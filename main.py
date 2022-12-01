@@ -38,17 +38,20 @@ if __name__=='__main__':
     # Path setting
     parser.add_argument('--data_name', default='IMDB', type=str,
                         help='Data name; Default is IMDB')
-    parser.add_argument('--preprocess_path', default='/mnt/storage1/kyohoon1/acl_text/preprocessed', type=str,
+    parser.add_argument('--preprocess_path', default='/HDD/kyohoon1/preprocessed', type=str,
                         help='Pre-processed data save path')
-    parser.add_argument('--data_path', default='/mnt/storage1/dataset', type=str,
+    parser.add_argument('--data_path', default='/HDD/dataset', type=str,
                         help='Original data path')
-    parser.add_argument('--model_save_path', default='/mnt/storage1/kyohoon1/model_checkpoint/ood', type=str,
+    parser.add_argument('--model_save_path', default='/HDD/kyohoon1/model_checkpoint/acl_text_aug', type=str,
                         help='Model checkpoint file path')
-    parser.add_argument('--result_path', default='/mnt/storage1/kyohoon1/results/ood', type=str,
+    parser.add_argument('--result_path', default='/HDD/kyohoon1/results/acl_text_aug', type=str,
                         help='Results file path')
     # Preprocessing setting
     parser.add_argument('--valid_ratio', default=0.2, type=float,
                         help='Validation split ratio; Default is 0.2')
+    # Model setting
+    parser.add_argument('--isPreTrain', default=True, type=str2bool,
+                        help='Use pre-trained language model; Default is True')
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']

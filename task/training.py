@@ -83,7 +83,7 @@ def training(args):
     write_log(logger, 'Instantiating model...')
     model = AugModel(encoder_model_type='bert', decoder_model_type='bert',
                      isPreTrain=args.isPreTrain, z_variation=args.z_variation,
-                     src_max_len=args.src_max_len, dropouot=args.dropouot)
+                     src_max_len=args.src_max_len, dropout=args.dropout)
     model.to(device)
 
     # 2) Dataloader setting
@@ -103,11 +103,11 @@ def training(args):
                             batch_size=args.batch_size, shuffle=False, pin_memory=True,
                             num_workers=args.num_workers)
     }
-    write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train_original'])}, {len(dataloader_dict['train_original'])}")
+    write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
     
     # 3) Optimizer & Learning rate scheduler setting
     optimizer = optimizer_select(model, args)
-    scheduler = shceduler_select(model, dataloader_dict, args)
+    scheduler = shceduler_select(optimizer, dataloader_dict, args)
     scaler = GradScaler()
     recon_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps)
 
@@ -140,7 +140,8 @@ def training(args):
                 model.train()
             else:
                 write_log(logger, 'Validation start...')
-                val_loss = 0
+                val_mmd_loss = 0
+                val_ce_loss = 0
                 val_acc = 0
                 model.eval()
 
@@ -160,16 +161,24 @@ def training(args):
                 src_seg = src_seg.to(device, non_blocking=True)
                 trg_label = trg_label.to(device, non_blocking=True)
 
+                # Reconsturction setting
+                non_pad = src_sequence != model.pad_idx
+                trg_sequence_gold = src_sequence[non_pad].contiguous().view(-1)
+
                 # Train
                 if phase == 'train':
                     with autocast():
                         encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
                                                             src_attention_mask=src_att,
-                                                            src_token_type_ids=src_seg)
-                        mmd_loss = MaximumMeanDiscrepancy(encoder_out, z)
-                        ce_loss = recon_loss()
+                                                            src_token_type_ids=src_seg,
+                                                            non_pad_position=non_pad)
+                        mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
+                                                          z.view(args.batch_size, -1), 
+                                                          z_var=args.z_variation) * 10
+                        ce_loss = recon_loss(decoder_out, trg_sequence_gold)
+                        total_loss = mmd_loss + ce_loss
 
-                    scaler.scale(loss).backward()
+                    scaler.scale(total_loss).backward()
                     if args.clip_grad_norm > 0:
                         scaler.unscale_(optimizer)
                         clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -182,13 +191,13 @@ def training(args):
                     if args.scheduler in ['constant', 'warmup']:
                         scheduler.step()
                     if args.scheduler == 'reduce_train':
-                        scheduler.step(loss)
+                        scheduler.step(total_loss)
 
                     # Print loss value only training
                     if i == 0 or freq == args.print_freq or i==len(dataloader_dict[phase]):
-                        acc = (predicted.max(dim=1)[1] == trg_label.argmax(dim=1)).sum() / len(trg_label)
-                        iter_log = "[Epoch:%03d][%03d/%03d] train_loss:%03.2f | train_acc:%03.2f%% | learning_rate:%1.6f | spend_time:%02.2fmin" % \
-                            (epoch, i, len(dataloader_dict[phase]), loss, acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                        acc = (decoder_out.argmax(dim=1) == trg_sequence_gold).sum() / len(trg_sequence_gold)
+                        iter_log = "[Epoch:%03d][%03d/%03d] train_ce_loss:%03.2f | train_mmd_loss:%03.2f | train_acc:%03.2f%% | learning_rate:%1.6f | spend_time:%02.2fmin" % \
+                            (epoch, i, len(dataloader_dict[phase]), ce_loss.item(), mmd_loss.item(), acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                         write_log(logger, iter_log)
                         freq = 0
                     freq += 1
@@ -196,10 +205,17 @@ def training(args):
                 # Validation
                 if phase == 'valid':
                     with torch.no_grad():
-                        predicted = model(input_ids=src_sequence, attention_mask=src_att)['logits']
-                        loss = F.cross_entropy(predicted, trg_label.argmax(dim=1))
-                    val_loss += loss
-                    val_acc += (predicted.max(dim=1)[1] == trg_label.argmax(dim=1)).sum() / len(trg_label.argmax(dim=1))
+                        encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
+                                                            src_attention_mask=src_att,
+                                                            src_token_type_ids=src_seg,
+                                                            non_pad_position=non_pad)
+                        mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
+                                                          z.view(args.batch_size, -1), 
+                                                          z_var=args.z_variation) * 10
+                        ce_loss = F.cross_entropy(decoder_out, trg_sequence_gold)
+                    val_mmd_loss += mmd_loss
+                    val_ce_loss += ce_loss
+                    val_acc += (decoder_out.argmax(dim=1) == trg_sequence_gold).sum() / len(trg_sequence_gold)
                     
             if phase == 'valid':
 
@@ -208,15 +224,16 @@ def training(args):
                 if args.scheduler == 'lambda':
                     scheduler.step()
 
-                val_loss /= len(dataloader_dict[loader_phase])
-                val_acc /= len(dataloader_dict[loader_phase])
-                write_log(logger, f'Mode: {total_phase}')
-                write_log(logger, 'Validation Loss: %3.3f' % val_loss)
+                val_ce_loss /= len(dataloader_dict[phase])
+                val_mmd_loss /= len(dataloader_dict[phase])
+                val_acc /= len(dataloader_dict[phase])
+                write_log(logger, 'Validation CrossEntropy Loss: %3.3f' % val_ce_loss)
+                write_log(logger, 'Validation MMD Loss: %3.3f' % val_mmd_loss)
                 write_log(logger, 'Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-                save_file_name = os.path.join(args.model_save_path, args.data_name, total_phase.split('_')[-1])
-                save_file_name += 'checkpoint2.pth.tar'
-                if val_loss < best_val_loss:
+                save_file_name = os.path.join(args.model_save_path, args.data_name)
+                save_file_name += 'checkpoint.pth.tar'
+                if val_ce_loss < best_val_loss:
                     write_log(logger, 'Checkpoint saving...')
                     torch.save({
                         'epoch': epoch,
@@ -225,23 +242,11 @@ def training(args):
                         'scheduler': scheduler.state_dict(),
                         'scaler': scaler.state_dict()
                     }, save_file_name)
-                    best_val_loss = val_loss
+                    best_val_loss = val_ce_loss
                     best_epoch = epoch
                 else:
                     else_log = f'Still {best_epoch} epoch Loss({round(best_val_loss.item(), 2)}) is better...'
                     write_log(logger, else_log)
-
-                with open(f'./results_{time_code}.txt', 'a') as f:
-                    f.write(f'{args.data_name}')
-                    f.write('\t')
-                    f.write(f'{total_phase}')
-                    f.write('\t')
-                    f.write(f'{epoch}')
-                    f.write('\t')
-                    f.write(f'{val_loss}')
-                    f.write('\t')
-                    f.write(f'{val_acc}')
-                    f.write('\n')
 
     # 3) Results
     write_log(logger, f'Best Epoch: {best_epoch}')
