@@ -21,7 +21,9 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
 from transformers import BertForSequenceClassification
 # Import custom modules
-from dataset import CustomDataset
+from model.model import AugModel
+from model.dataset import CustomDataset
+from model.loss import MaximumMeanDiscrepancy
 from optimizer.utils import shceduler_select, optimizer_select
 from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
 
@@ -57,7 +59,7 @@ def training(args):
         train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
         valid_src_input_ids = f.get('valid_src_input_ids')[:]
         valid_src_attention_mask = f.get('valid_src_attention_mask')[:]
-        valid_src_token_type_ids = f.get('train_src_token_type_ids')[:]
+        valid_src_token_type_ids = f.get('valid_src_token_type_ids')[:]
         train_trg_list = f.get('train_label')[:]
         train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
         valid_trg_list = f.get('valid_label')[:]
@@ -79,9 +81,10 @@ def training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-
-    total_model_dict = dict()
-    model = BertForSequenceClassification.from_pretrained('bert-base-cased', num_labels=num_labels)
+    model = AugModel(encoder_model_type='bert', decoder_model_type='bert',
+                     isPreTrain=args.isPreTrain, z_variation=args.z_variation,
+                     src_max_len=args.src_max_len, dropouot=args.dropouot)
+    model.to(device)
 
     # 2) Dataloader setting
     dataset_dict = {
@@ -103,10 +106,10 @@ def training(args):
     write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train_original'])}, {len(dataloader_dict['train_original'])}")
     
     # 3) Optimizer & Learning rate scheduler setting
-    optimizer = optimizer_select(total_model_dict[total_phase], args)
-    scheduler = shceduler_select(optimizer_dict[total_phase], dataloader_dict, args)
+    optimizer = optimizer_select(model, args)
+    scheduler = shceduler_select(model, dataloader_dict, args)
     scaler = GradScaler()
-    ce = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps)
+    recon_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps)
 
     # 3) Model resume
     start_epoch = 0
@@ -149,17 +152,22 @@ def training(args):
                 # Input setting
                 src_sequence = batch_iter[0]
                 src_att = batch_iter[1]
-                trg_label = batch_iter[2]
+                src_seg = batch_iter[2]
+                trg_label = batch_iter[3]
 
                 src_sequence = src_sequence.to(device, non_blocking=True)
                 src_att = src_att.to(device, non_blocking=True)
+                src_seg = src_seg.to(device, non_blocking=True)
                 trg_label = trg_label.to(device, non_blocking=True)
 
                 # Train
                 if phase == 'train':
                     with autocast():
-                        predicted = model(input_ids=src_sequence, attention_mask=src_att)['logits']
-                        loss = ce(predicted, trg_label)
+                        encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
+                                                            src_attention_mask=src_att,
+                                                            src_token_type_ids=src_seg)
+                        mmd_loss = MaximumMeanDiscrepancy(encoder_out, z)
+                        ce_loss = recon_loss()
 
                     scaler.scale(loss).backward()
                     if args.clip_grad_norm > 0:

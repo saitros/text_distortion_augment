@@ -8,7 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 from transformers import AutoTokenizer
 # Import custom modules
-from task.utils import total_data_load
+from task.utils import data_load
 from utils import TqdmLoggingHandler, write_log
 
 from datasets import load_dataset
@@ -34,7 +34,7 @@ def preprocessing(args):
 
     write_log(logger, 'Start preprocessing!')
 
-    src_list, trg_list = total_data_load(args)
+    src_list, trg_list = data_load(args)
 
     #===================================#
     #==========Pre-processing===========#
@@ -80,7 +80,7 @@ def preprocessing(args):
         f.create_dataset('train_token_type_ids', data=processed_sequences['train']['token_type_ids'])
         f.create_dataset('valid_src_input_ids', data=processed_sequences['valid']['input_ids'])
         f.create_dataset('valid_src_attention_mask', data=processed_sequences['valid']['attention_mask'])
-        f.create_dataset('valid_token_type_ids', data=processed_sequences['train']['token_type_ids'])
+        f.create_dataset('valid_token_type_ids', data=processed_sequences['valid']['token_type_ids'])
         f.create_dataset('train_label', data=np.array(trg_list['train']).astype(int))
         f.create_dataset('valid_label', data=np.array(trg_list['valid']).astype(int))
 

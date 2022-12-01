@@ -9,7 +9,7 @@ from datasets import load_dataset
 def data_split_index(seq, valid_ratio: float = 0.1, test_ratio: float = 0.03):
 
     paired_data_len = len(seq)
-    valid_num = int(paired_data_len * valid_ration)
+    valid_num = int(paired_data_len * valid_ratio)
     test_num = int(paired_data_len * test_ratio)
 
     valid_index = np.random.choice(paired_data_len, valid_num, replace=False)
@@ -25,11 +25,13 @@ def data_load(args):
     trg_list = dict()
 
     if args.data_name == 'IMDB':
-        imdb_data_path = os.path.join(args.data_path,'text_classification/IMDB')
+        imdb_data_path = os.path.join(args.data_path,'IMDB')
 
         train_dat = pd.read_csv(os.path.join(imdb_data_path, 'train.csv'))
         test_dat = pd.read_csv(os.path.join(imdb_data_path, 'test.csv'))
 
+        train_dat['sentiment'] = train_dat['sentiment'].replace('positive', 0)
+        train_dat['sentiment'] = train_dat['sentiment'].replace('negative', 1)
         test_dat['sentiment'] = test_dat['sentiment'].replace('positive', 0)
         test_dat['sentiment'] = test_dat['sentiment'].replace('negative', 1)
 

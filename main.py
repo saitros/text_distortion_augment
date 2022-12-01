@@ -4,7 +4,7 @@ import argparse
 # Import custom modules
 from task.preprocessing import preprocessing
 from task.training import training
-from task.testing import testing
+# from task.testing import testing
 # Utils
 from utils import str2bool, path_check, set_random_seed
 
@@ -22,8 +22,8 @@ def main(args):
     if args.training:
         training(args)
 
-    if args.testing:
-        testing(args)
+    # if args.testing:
+    #     testing(args)
 
     # Time calculate
     print(f'Done! ; {round((time.time()-total_start_time)/60, 3)}min spend')
@@ -38,7 +38,7 @@ if __name__=='__main__':
     # Path setting
     parser.add_argument('--data_name', default='IMDB', type=str,
                         help='Data name; Default is IMDB')
-    parser.add_argument('--preprocess_path', default='./preprocessed', type=str,
+    parser.add_argument('--preprocess_path', default='/mnt/storage1/kyohoon1/acl_text/preprocessed', type=str,
                         help='Pre-processed data save path')
     parser.add_argument('--data_path', default='/mnt/storage1/dataset', type=str,
                         help='Original data path')
@@ -46,6 +46,9 @@ if __name__=='__main__':
                         help='Model checkpoint file path')
     parser.add_argument('--result_path', default='/mnt/storage1/kyohoon1/results/ood', type=str,
                         help='Results file path')
+    # Preprocessing setting
+    parser.add_argument('--valid_ratio', default=0.2, type=float,
+                        help='Validation split ratio; Default is 0.2')
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']
