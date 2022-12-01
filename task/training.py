@@ -109,7 +109,7 @@ def training(args):
     optimizer = optimizer_select(model, args)
     scheduler = shceduler_select(optimizer, dataloader_dict, args)
     scaler = GradScaler()
-    recon_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps)
+    recon_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=model.pad_idx)
 
     # 3) Model resume
     start_epoch = 0
