@@ -89,10 +89,10 @@ def training(args):
     # 2) Dataloader setting
     dataset_dict = {
         'train': CustomDataset(src_list=train_src_input_ids, src_att_list=train_src_attention_mask,
-                               src_token_type_ids=train_src_token_type_ids,
+                               src_seg_list=train_src_token_type_ids,
                                trg_list=train_trg_list, src_max_len=args.src_max_len),
         'valid': CustomDataset(src_list=valid_src_input_ids, src_att_list=valid_src_attention_mask,
-                               src_token_type_ids=valid_src_token_type_ids,
+                               src_seg_list=valid_src_token_type_ids,
                                trg_list=valid_trg_list, src_max_len=args.src_max_len),
     }
     dataloader_dict = {

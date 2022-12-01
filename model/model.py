@@ -8,7 +8,7 @@ from transformers import BertConfig, BertModel
 class AugModel(nn.Module):
     def __init__(self, encoder_model_type: str = 'bert', decoder_model_type: str = 'bert',
                  isPreTrain: bool = True, z_variation: float = 2, 
-                 src_max_len: int = 768, dropouot: float = 0.3):
+                 src_max_len: int = 768, dropout: float = 0.3):
         super().__init__()
 
         """
@@ -52,9 +52,9 @@ class AugModel(nn.Module):
             else:
                 self.decoder_model = BertModel(config=self.model_config)
 
-            self.decoder_linear1 = nn.Linear(model_config.hidden_size, 256)
+            self.decoder_linear1 = nn.Linear(self.model_config.hidden_size, 256)
             self.decoder_norm = nn.LayerNorm(256, eps=1e-12)
-            self.decoder_linear2 = nn.Linear(256, model_config.vocab_size)
+            self.decoder_linear2 = nn.Linear(256, self.model_config.vocab_size)
         else:
             raise Exception('''It's not ready...''')
 

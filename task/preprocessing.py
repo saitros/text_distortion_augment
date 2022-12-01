@@ -77,10 +77,10 @@ def preprocessing(args):
     with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'w') as f:
         f.create_dataset('train_src_input_ids', data=processed_sequences['train']['input_ids'])
         f.create_dataset('train_src_attention_mask', data=processed_sequences['train']['attention_mask'])
-        f.create_dataset('train_token_type_ids', data=processed_sequences['train']['token_type_ids'])
+        f.create_dataset('train_src_token_type_ids', data=processed_sequences['train']['token_type_ids'])
         f.create_dataset('valid_src_input_ids', data=processed_sequences['valid']['input_ids'])
         f.create_dataset('valid_src_attention_mask', data=processed_sequences['valid']['attention_mask'])
-        f.create_dataset('valid_token_type_ids', data=processed_sequences['valid']['token_type_ids'])
+        f.create_dataset('valid_src_token_type_ids', data=processed_sequences['valid']['token_type_ids'])
         f.create_dataset('train_label', data=np.array(trg_list['train']).astype(int))
         f.create_dataset('valid_label', data=np.array(trg_list['valid']).astype(int))
 
