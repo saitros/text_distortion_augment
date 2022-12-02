@@ -104,6 +104,11 @@ def training(args):
                             num_workers=args.num_workers)
     }
     write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
+
+    del (
+        train_src_input_ids, train_src_attention_mask, train_src_token_type_ids, train_trg_list,
+        valid_src_input_ids, valid_src_attention_mask, valid_src_token_type_ids, valid_trg_list
+    )
     
     # 3) Optimizer & Learning rate scheduler setting
     optimizer = optimizer_select(model, args)
@@ -178,15 +183,15 @@ def training(args):
                         ce_loss = recon_loss(decoder_out, trg_sequence_gold)
                         total_loss = mmd_loss + ce_loss
 
-                    scaler.scale(total_loss).backward()
-                    if args.clip_grad_norm > 0:
-                        scaler.unscale_(optimizer)
-                        clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-                    scaler.step(optimizer)
-                    scaler.update()
-                    # loss.backward()
-                    # clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-                    # optimizer.step()
+                    # scaler.scale(total_loss).backward()
+                    # if args.clip_grad_norm > 0:
+                    #     scaler.unscale_(optimizer)
+                    #     clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                    # scaler.step(optimizer)
+                    # scaler.update()
+                    total_loss.backward()
+                    clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                    optimizer.step()
 
                     if args.scheduler in ['constant', 'warmup']:
                         scheduler.step()
@@ -194,12 +199,12 @@ def training(args):
                         scheduler.step(total_loss)
 
                     # Print loss value only training
-                    if i == 0 or freq == args.print_freq or i==len(dataloader_dict[phase]):
+                    if i == 0 or freq == args.print_freq or i==(len(dataloader_dict[phase])-1):
                         acc = (decoder_out.argmax(dim=1) == trg_sequence_gold).sum() / len(trg_sequence_gold)
                         iter_log = "[Epoch:%03d][%03d/%03d] train_ce_loss:%03.2f | train_mmd_loss:%03.2f | train_acc:%03.2f%% | learning_rate:%1.6f | spend_time:%02.2fmin" % \
-                            (epoch, i, len(dataloader_dict[phase]), ce_loss.item(), mmd_loss.item(), acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                            (epoch, i+1, len(dataloader_dict[phase]), ce_loss.item(), mmd_loss.item(), acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                         write_log(logger, iter_log)
-                        freq = 0
+                        freq = -1
                     freq += 1
 
                 # Validation
@@ -220,7 +225,7 @@ def training(args):
             if phase == 'valid':
 
                 if args.scheduler == 'reduce_valid':
-                    scheduler.step(val_loss)
+                    scheduler.step(val_ce_loss)
                 if args.scheduler == 'lambda':
                     scheduler.step()
 

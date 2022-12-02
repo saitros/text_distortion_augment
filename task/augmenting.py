@@ -20,7 +20,7 @@ from model.model import AugModel
 from model.dataset import CustomDataset
 from utils import TqdmLoggingHandler, write_log
 
-def training(args):
+def augmenting(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     #===================================#
@@ -119,11 +119,16 @@ def training(args):
         src_seg = src_seg.to(device, non_blocking=True)
         trg_label = trg_label.to(device, non_blocking=True)
 
+        # Reconsturction setting
+        non_pad = src_sequence != model.pad_idx
+
         with torch.no_grad():
             with autocast():
                 encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
                                                     src_attention_mask=src_att,
-                                                    src_token_type_ids=src_seg)
+                                                    src_token_type_ids=src_seg,
+                                                    non_pad_position=non_pad)
             
         # 
+        print(tokenizer.batch_decode(decoder_out.argmax(dim=1)))
         aug_list.append(tokenizer.batch_decode(decoder_out.argmax(dim=1)))
