@@ -14,6 +14,7 @@ from time import time
 # Import PyTorch
 import torch
 import torch.nn as nn
+import torch.backends.cudnn as cudnn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.nn.utils import clip_grad_norm_
@@ -113,8 +114,9 @@ def training(args):
     # 3) Optimizer & Learning rate scheduler setting
     optimizer = optimizer_select(model, args)
     scheduler = shceduler_select(optimizer, dataloader_dict, args)
+    cudnn.benchmark = True
     scaler = GradScaler()
-    recon_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=model.pad_idx)
+    recon_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=model.pad_idx).to(device)
 
     # 3) Model resume
     start_epoch = 0
@@ -167,31 +169,27 @@ def training(args):
                 trg_label = trg_label.to(device, non_blocking=True)
 
                 # Reconsturction setting
-                non_pad = src_sequence != model.pad_idx
-                trg_sequence_gold = src_sequence[non_pad].contiguous().view(-1)
+                trg_sequence_gold = src_sequence.contiguous().view(-1)
+                non_pad = trg_sequence_gold != model.pad_idx
 
                 # Train
                 if phase == 'train':
                     with autocast():
                         encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
                                                             src_attention_mask=src_att,
-                                                            src_token_type_ids=src_seg,
-                                                            non_pad_position=non_pad)
+                                                            src_token_type_ids=src_seg)
                         mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
                                                           z.view(args.batch_size, -1), 
                                                           z_var=args.z_variation) * 10
-                        ce_loss = recon_loss(decoder_out, trg_sequence_gold)
+                        ce_loss = recon_loss(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
                         total_loss = mmd_loss + ce_loss
 
-                    # scaler.scale(total_loss).backward()
-                    # if args.clip_grad_norm > 0:
-                    #     scaler.unscale_(optimizer)
-                    #     clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-                    # scaler.step(optimizer)
-                    # scaler.update()
-                    total_loss.backward()
-                    clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-                    optimizer.step()
+                    scaler.scale(total_loss).backward()
+                    if args.clip_grad_norm > 0:
+                        scaler.unscale_(optimizer)
+                        clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                    scaler.step(optimizer)
+                    scaler.update()
 
                     if args.scheduler in ['constant', 'warmup']:
                         scheduler.step()
@@ -200,11 +198,11 @@ def training(args):
 
                     # Print loss value only training
                     if i == 0 or freq == args.print_freq or i==(len(dataloader_dict[phase])-1):
-                        acc = (decoder_out.argmax(dim=1) == trg_sequence_gold).sum() / len(trg_sequence_gold)
+                        acc = (decoder_out.argmax(dim=2).view(-1)[non_pad] == trg_sequence_gold[non_pad]).sum() / len(trg_sequence_gold[non_pad])
                         iter_log = "[Epoch:%03d][%03d/%03d] train_ce_loss:%03.2f | train_mmd_loss:%03.2f | train_acc:%03.2f%% | learning_rate:%1.6f | spend_time:%02.2fmin" % \
                             (epoch, i+1, len(dataloader_dict[phase]), ce_loss.item(), mmd_loss.item(), acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                         write_log(logger, iter_log)
-                        freq = -1
+                        freq = 0
                     freq += 1
 
                 # Validation
@@ -212,15 +210,14 @@ def training(args):
                     with torch.no_grad():
                         encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
                                                             src_attention_mask=src_att,
-                                                            src_token_type_ids=src_seg,
-                                                            non_pad_position=non_pad)
+                                                            src_token_type_ids=src_seg)
                         mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
                                                           z.view(args.batch_size, -1), 
                                                           z_var=args.z_variation) * 10
-                        ce_loss = F.cross_entropy(decoder_out, trg_sequence_gold)
+                        ce_loss = F.cross_entropy(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
                     val_mmd_loss += mmd_loss
                     val_ce_loss += ce_loss
-                    val_acc += (decoder_out.argmax(dim=1) == trg_sequence_gold).sum() / len(trg_sequence_gold)
+                    val_acc += (decoder_out.argmax(dim=2).view(-1)[non_pad] == trg_sequence_gold[non_pad]).sum() / len(trg_sequence_gold[non_pad])
                     
             if phase == 'valid':
 

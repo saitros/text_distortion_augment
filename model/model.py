@@ -1,6 +1,8 @@
 # Import PyTorch
 import torch
 import torch.nn as nn
+from torch.autograd import Variable
+from torch.cuda.amp import autocast
 from torch.nn import functional as F
 # Import Huggingface
 from transformers import BertConfig, BertModel
@@ -58,17 +60,17 @@ class AugModel(nn.Module):
         else:
             raise Exception('''It's not ready...''')
 
-    def forward(self, src_input_ids, src_attention_mask, src_token_type_ids, non_pad_position = None):
+    @autocast()
+    def forward(self, src_input_ids, src_attention_mask, src_token_type_ids):
 
         # Encoding
         encoder_out = self.encoder_model(input_ids=src_input_ids, 
                                          attention_mask=src_attention_mask,
                                          token_type_ids=src_token_type_ids)
         encoder_out = encoder_out['last_hidden_state']
-        # encoder_out = encoder_out['last_hidden_state'].mean(dim=1)
 
         # Sampling Z
-        z = self.z_variation * encoder_out.data.new(encoder_out.size()).normal_()
+        z = self.z_variation * Variable(encoder_out.data.new(encoder_out.size()).normal_())
 
         # Decoding
         decoder_out = self.decoder_model(inputs_embeds=encoder_out, 
@@ -76,21 +78,21 @@ class AugModel(nn.Module):
                                          token_type_ids=src_token_type_ids)
         decoder_out = decoder_out['last_hidden_state']
         
-        if non_pad_position is not None:
-            decoder_out = decoder_out[non_pad_position]
         decoder_out = self.dropout(F.gelu(self.decoder_linear1(decoder_out)))
         decoder_out = self.decoder_linear2(self.decoder_norm(decoder_out))
 
         return encoder_out, decoder_out, z
 
+    @autocast()
     def generate(self, src_input_ids, src_attention_mask, src_token_type_ids):
         # Encoding
-        encoder_out = self.encoder_model(input_ids=src_input_ids, attention_mask=src_attention_mask,
-                                 token_type_ids=src_token_type_ids)
-        encoder_out = encoder_out['last_hidden_state'].mean(dim=1)
+        encoder_out = self.encoder_model(input_ids=src_input_ids, 
+                                         attention_mask=src_attention_mask,
+                                         token_type_ids=src_token_type_ids)
+        encoder_out = encoder_out['last_hidden_state']
 
         # Sampling Z
-        z = self.sample_z(encoder_out, sigma=self.z_variation * 2)
+        z = (self.z_variation*2) * Variable(encoder_out.data.new(encoder_out.size()).normal_())
 
         # Decoding
         decoder_out = self.dropout(F.gelu(self.decoder_linear1(encoder_out)))

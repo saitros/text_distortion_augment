@@ -6,12 +6,14 @@ import h5py
 import pickle
 import logging
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 from time import time
 from transformers import AutoTokenizer
 # Import PyTorch
 import torch
 import torch.nn as nn
+import torch.backends.cudnn as cudnn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler, autocast
@@ -88,23 +90,24 @@ def augmenting(args):
     write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
     
     # 3) Model loading
+    cudnn.benchmark = True
     save_file_name = os.path.join(args.model_save_path, args.data_name)
     save_file_name += 'checkpoint.pth.tar'
     checkpoint = torch.load(save_file_name)
     model.load_state_dict(checkpoint['model'])
+    write_log(logger, f'Loaded model from {save_file_name}')
 
     #===================================#
     #=========Model Train Start=========#
     #===================================#
-
-    write_log(logger, 'Traing start!')
-    best_val_loss = 1e+10
     
     start_time_e = time()
     write_log(logger, 'Augmenting start...')
     model.eval()
     tokenizer = AutoTokenizer.from_pretrained('bert-base-cased')
+    seq_list = list()
     aug_list = list()
+    aug2_list = list()
 
     for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
@@ -119,16 +122,23 @@ def augmenting(args):
         src_seg = src_seg.to(device, non_blocking=True)
         trg_label = trg_label.to(device, non_blocking=True)
 
-        # Reconsturction setting
-        non_pad = src_sequence != model.pad_idx
-
         with torch.no_grad():
             with autocast():
                 encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
                                                     src_attention_mask=src_att,
-                                                    src_token_type_ids=src_seg,
-                                                    non_pad_position=non_pad)
-            
+                                                    src_token_type_ids=src_seg)
+
+                decoder_out2 = model.generate(src_input_ids=src_sequence, 
+                                              src_attention_mask=src_att,
+                                              src_token_type_ids=src_seg)
         # 
-        print(tokenizer.batch_decode(decoder_out.argmax(dim=1)))
-        aug_list.append(tokenizer.batch_decode(decoder_out.argmax(dim=1)))
+        seq_list.extend(tokenizer.batch_decode(src_sequence))
+        aug_list.extend(tokenizer.batch_decode(decoder_out.argmax(dim=2)))
+        aug2_list.extend(tokenizer.batch_decode(decoder_out2.argmax(dim=2)))
+
+    result_dat = pd.DataFrame({
+        'seq': seq_list,
+        'aug': aug_list,
+        'aug2': aug2_list
+    })
+    result_dat.to_csv('./result.csv', index=False)
