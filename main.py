@@ -56,6 +56,10 @@ if __name__=='__main__':
     # Model setting
     parser.add_argument('--isPreTrain', default=True, type=str2bool,
                         help='Use pre-trained language model; Default is True')
+    parser.add_argument('--aug_model', default='bert', type=str,
+                        help='')
+    parser.add_argument('--cls_model', default='deberta', type=str,
+                        help='')
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']

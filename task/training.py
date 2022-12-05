@@ -20,9 +20,8 @@ from torch.utils.data import DataLoader
 from torch.nn.utils import clip_grad_norm_
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
-from transformers import BertForSequenceClassification
 # Import custom modules
-from model.model import AugModel
+from model.model import AugModel, ClsModel
 from model.dataset import CustomDataset
 from model.loss import MaximumMeanDiscrepancy
 from optimizer.utils import shceduler_select, optimizer_select
@@ -54,7 +53,7 @@ def training(args):
 
     save_path = os.path.join(args.preprocess_path, args.data_name)
 
-    with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'r') as f:
+    with h5py.File(os.path.join(save_path, args.cls_tokenizer, 'processed.hdf5'), 'r') as f:
         train_src_input_ids = f.get('train_src_input_ids')[:]
         train_src_attention_mask = f.get('train_src_attention_mask')[:]
         train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
@@ -65,8 +64,20 @@ def training(args):
         train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
         valid_trg_list = f.get('valid_label')[:]
         valid_trg_list = F.one_hot(torch.tensor(valid_trg_list, dtype=torch.long)).numpy()
+    
+    with h5py.File(os.path.join(save_path, args.aug_tokenizer, 'processed.hdf5'), 'r') as f:
+        aug_train_src_input_ids = f.get('train_src_input_ids')[:]
+        aug_train_src_attention_mask = f.get('train_src_attention_mask')[:]
+        aug_train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
+        aug_valid_src_input_ids = f.get('valid_src_input_ids')[:]
+        aug_valid_src_attention_mask = f.get('valid_src_attention_mask')[:]
+        aug_valid_src_token_type_ids = f.get('valid_src_token_type_ids')[:]
+        aug_train_trg_list = f.get('train_label')[:]
+        aug_train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
+        aug_valid_trg_list = f.get('valid_label')[:]
+        aug_valid_trg_list = F.one_hot(torch.tensor(valid_trg_list, dtype=torch.long)).numpy()
 
-    with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
+    with open(os.path.join(save_path, args.cls_tokenizer, 'word2id.pkl'), 'rb') as f:
         data_ = pickle.load(f)
         src_word2id = data_['src_word2id']
         src_vocab_num = len(src_word2id)
@@ -82,10 +93,13 @@ def training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = AugModel(encoder_model_type='bert', decoder_model_type='bert',
-                     isPreTrain=args.isPreTrain, z_variation=args.z_variation,
-                     src_max_len=args.src_max_len, dropout=args.dropout)
-    model.to(device)
+    aug_model = AugModel(encoder_model_type='bert', decoder_model_type='bert',
+                         isPreTrain=args.isPreTrain, z_variation=args.z_variation,
+                         dropout=args.dropout)
+    cls_model = ClsModel(model_type=args.cls_model_type, num_labels=num_labels)
+
+    aug_model.to(device)
+    cls_model.to(device)
 
     # 2) Dataloader setting
     dataset_dict = {
@@ -95,12 +109,24 @@ def training(args):
         'valid': CustomDataset(src_list=valid_src_input_ids, src_att_list=valid_src_attention_mask,
                                src_seg_list=valid_src_token_type_ids,
                                trg_list=valid_trg_list, src_max_len=args.src_max_len),
+        'aug_train': CustomDataset(src_list=aug_train_src_input_ids, src_att_list=aug_train_src_attention_mask,
+                                   src_seg_list=aug_train_src_token_type_ids,
+                                   trg_list=aug_train_trg_list, src_max_len=args.src_max_len),
+        'aug_valid': CustomDataset(src_list=aug_valid_src_input_ids, src_att_list=aug_valid_src_attention_mask,
+                                   src_seg_list=aug_valid_src_token_type_ids,
+                                   trg_list=aug_valid_trg_list, src_max_len=args.src_max_len),
     }
     dataloader_dict = {
-        'train': DataLoader(dataset_dict['train'], drop_last=True,
-                            batch_size=args.batch_size, shuffle=True, pin_memory=True,
+        'train': DataLoader(dataset_dict['train'], drop_last=False,
+                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
                             num_workers=args.num_workers),
         'valid': DataLoader(dataset_dict['valid'], drop_last=False,
+                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                            num_workers=args.num_workers),
+        'aug_train': DataLoader(dataset_dict['aug_train'], drop_last=False,
+                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                            num_workers=args.num_workers),
+        'aug_valid': DataLoader(dataset_dict['aug_valid'], drop_last=False,
                             batch_size=args.batch_size, shuffle=False, pin_memory=True,
                             num_workers=args.num_workers)
     }
@@ -112,7 +138,7 @@ def training(args):
     )
     
     # 3) Optimizer & Learning rate scheduler setting
-    optimizer = optimizer_select(model, args)
+    optimizer = optimizer_select(aug_model, args)
     scheduler = shceduler_select(optimizer, dataloader_dict, args)
     cudnn.benchmark = True
     scaler = GradScaler()
@@ -138,117 +164,140 @@ def training(args):
     #===================================#
 
     write_log(logger, 'Traing start!')
-    best_val_loss = 1e+10
+    best_val_loss = 1e+3
     
     for epoch in range(start_epoch + 1, args.num_epochs + 1):
-        start_time_e = time()
-        for phase in ['train', 'valid']:
-            if phase == 'train':
-                model.train()
-            else:
-                write_log(logger, 'Validation start...')
-                val_mmd_loss = 0
-                val_ce_loss = 0
-                val_acc = 0
-                model.eval()
-
-            for i, batch_iter in enumerate(tqdm(dataloader_dict[phase], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
+        while True:
+            start_time_e = time()
+            finish_epoch = False
+            for phase in ['train', 'valid']:
+                if 'train' in phase:
+                    model.train()
+                else:
+                    write_log(logger, 'Validation start...')
+                    val_mmd_loss = 0
+                    val_ce_loss = 0
+                    val_acc = 0
+                    model.eval()
 
                 # Optimizer setting
                 optimizer.zero_grad(set_to_none=True)
 
-                # Input setting
-                src_sequence = batch_iter[0]
-                src_att = batch_iter[1]
-                src_seg = batch_iter[2]
-                trg_label = batch_iter[3]
+                for _ in range(args.num_grad_accumulate):
 
-                src_sequence = src_sequence.to(device, non_blocking=True)
-                src_att = src_att.to(device, non_blocking=True)
-                src_seg = src_seg.to(device, non_blocking=True)
-                trg_label = trg_label.to(device, non_blocking=True)
+                    try:
+                        batch_iter = next(dataloader_dict['train'])
+                        aug_batch_iter = next(dataloader_dict['aug_train'])
+                    except StopIteration:
+                        batch_iter = iter(dataloader_dict['train'])
+                        aug_batch_iter = iter(dataloader_dict['aug_train'])
+                        batch_iter = next(dataloader_dict['train'])
+                        aug_batch_iter = next(dataloader_dict['aug_train'])
+                        finish_epoch = True
 
-                # Reconsturction setting
-                trg_sequence_gold = src_sequence.contiguous().view(-1)
-                non_pad = trg_sequence_gold != model.pad_idx
+                    # Input setting
+                    src_sequence = batch_iter[0]
+                    src_att = batch_iter[1]
+                    src_seg = batch_iter[2]
+                    trg_label = batch_iter[3]
 
-                # Train
-                if phase == 'train':
-                    with autocast():
-                        encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
-                                                            src_attention_mask=src_att,
-                                                            src_token_type_ids=src_seg)
-                        mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
-                                                          z.view(args.batch_size, -1), 
-                                                          z_var=args.z_variation) * 10
-                        ce_loss = recon_loss(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
-                        total_loss = mmd_loss + ce_loss
+                    src_sequence = src_sequence.to(device, non_blocking=True)
+                    src_att = src_att.to(device, non_blocking=True)
+                    src_seg = src_seg.to(device, non_blocking=True)
+                    trg_label = trg_label.to(device, non_blocking=True)
 
-                    scaler.scale(total_loss).backward()
-                    if args.clip_grad_norm > 0:
-                        scaler.unscale_(optimizer)
-                        clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-                    scaler.step(optimizer)
-                    scaler.update()
+                    # Augmentation input setting
+                    aug_src_sequence = aug_batch_iter[0]
+                    aug_src_att = aug_batch_iter[1]
+                    aug_src_seg = aug_batch_iter[2]
+                    aug_trg_label = aug_batch_iter[3]
 
-                    if args.scheduler in ['constant', 'warmup']:
-                        scheduler.step()
-                    if args.scheduler == 'reduce_train':
-                        scheduler.step(total_loss)
+                    aug_src_sequence = aug_src_sequence.to(device, non_blocking=True)
+                    aug_src_att = aug_src_att.to(device, non_blocking=True)
+                    aug_src_seg = aug_src_seg.to(device, non_blocking=True)
+                    aug_trg_label = aug_trg_label.to(device, non_blocking=True)
 
-                    # Print loss value only training
-                    if i == 0 or freq == args.print_freq or i==(len(dataloader_dict[phase])-1):
-                        acc = (decoder_out.argmax(dim=2).view(-1)[non_pad] == trg_sequence_gold[non_pad]).sum() / len(trg_sequence_gold[non_pad])
-                        iter_log = "[Epoch:%03d][%03d/%03d] train_ce_loss:%03.2f | train_mmd_loss:%03.2f | train_acc:%03.2f%% | learning_rate:%1.6f | spend_time:%02.2fmin" % \
-                            (epoch, i+1, len(dataloader_dict[phase]), ce_loss.item(), mmd_loss.item(), acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
-                        write_log(logger, iter_log)
-                        freq = 0
-                    freq += 1
+                    # Reconsturction setting
+                    trg_sequence_gold = src_sequence.contiguous().view(-1)
+                    non_pad = trg_sequence_gold != model.pad_idx
 
-                # Validation
+                    # Train
+                    if phase == 'train':
+                        with autocast():
+                            encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
+                                                                src_attention_mask=src_att,
+                                                                src_token_type_ids=src_seg)
+                            mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
+                                                            z.view(args.batch_size, -1), 
+                                                            z_var=args.z_variation) * 10
+                            ce_loss = recon_loss(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
+                            total_loss = mmd_loss + ce_loss
+
+                        scaler.scale(total_loss).backward()
+                        if args.clip_grad_norm > 0:
+                            scaler.unscale_(optimizer)
+                            clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                        scaler.step(optimizer)
+                        scaler.update()
+
+                        if args.scheduler in ['constant', 'warmup']:
+                            scheduler.step()
+                        if args.scheduler == 'reduce_train':
+                            scheduler.step(total_loss)
+
+                        # Print loss value only training
+                        if i == 0 or freq == args.print_freq or i==(len(dataloader_dict[phase])-1):
+                            acc = (decoder_out.argmax(dim=2).view(-1)[non_pad] == trg_sequence_gold[non_pad]).sum() / len(trg_sequence_gold[non_pad])
+                            iter_log = "[Epoch:%03d][%03d/%03d] train_ce_loss:%03.2f | train_mmd_loss:%03.2f | train_acc:%03.2f%% | learning_rate:%1.6f | spend_time:%02.2fmin" % \
+                                (epoch, i+1, len(dataloader_dict[phase]), ce_loss.item(), mmd_loss.item(), acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                            write_log(logger, iter_log)
+                            freq = 0
+                        freq += 1
+
+                    # Validation
+                    if phase == 'valid':
+                        with torch.no_grad():
+                            encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
+                                                                src_attention_mask=src_att,
+                                                                src_token_type_ids=src_seg)
+                            mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
+                                                            z.view(args.batch_size, -1), 
+                                                            z_var=args.z_variation) * 10
+                            ce_loss = F.cross_entropy(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
+                        val_mmd_loss += mmd_loss
+                        val_ce_loss += ce_loss
+                        val_acc += (decoder_out.argmax(dim=2).view(-1)[non_pad] == trg_sequence_gold[non_pad]).sum() / len(trg_sequence_gold[non_pad])
+                        
                 if phase == 'valid':
-                    with torch.no_grad():
-                        encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
-                                                            src_attention_mask=src_att,
-                                                            src_token_type_ids=src_seg)
-                        mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
-                                                          z.view(args.batch_size, -1), 
-                                                          z_var=args.z_variation) * 10
-                        ce_loss = F.cross_entropy(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
-                    val_mmd_loss += mmd_loss
-                    val_ce_loss += ce_loss
-                    val_acc += (decoder_out.argmax(dim=2).view(-1)[non_pad] == trg_sequence_gold[non_pad]).sum() / len(trg_sequence_gold[non_pad])
-                    
-            if phase == 'valid':
 
-                if args.scheduler == 'reduce_valid':
-                    scheduler.step(val_ce_loss)
-                if args.scheduler == 'lambda':
-                    scheduler.step()
+                    if args.scheduler == 'reduce_valid':
+                        scheduler.step(val_ce_loss)
+                    if args.scheduler == 'lambda':
+                        scheduler.step()
 
-                val_ce_loss /= len(dataloader_dict[phase])
-                val_mmd_loss /= len(dataloader_dict[phase])
-                val_acc /= len(dataloader_dict[phase])
-                write_log(logger, 'Validation CrossEntropy Loss: %3.3f' % val_ce_loss)
-                write_log(logger, 'Validation MMD Loss: %3.3f' % val_mmd_loss)
-                write_log(logger, 'Validation Accuracy: %3.2f%%' % (val_acc * 100))
+                    val_ce_loss /= len(dataloader_dict[phase])
+                    val_mmd_loss /= len(dataloader_dict[phase])
+                    val_acc /= len(dataloader_dict[phase])
+                    write_log(logger, 'Validation CrossEntropy Loss: %3.3f' % val_ce_loss)
+                    write_log(logger, 'Validation MMD Loss: %3.3f' % val_mmd_loss)
+                    write_log(logger, 'Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-                save_file_name = os.path.join(args.model_save_path, args.data_name)
-                save_file_name += 'checkpoint.pth.tar'
-                if val_ce_loss < best_val_loss:
-                    write_log(logger, 'Checkpoint saving...')
-                    torch.save({
-                        'epoch': epoch,
-                        'model': model.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                        'scheduler': scheduler.state_dict(),
-                        'scaler': scaler.state_dict()
-                    }, save_file_name)
-                    best_val_loss = val_ce_loss
-                    best_epoch = epoch
-                else:
-                    else_log = f'Still {best_epoch} epoch Loss({round(best_val_loss.item(), 2)}) is better...'
-                    write_log(logger, else_log)
+                    save_file_name = os.path.join(args.model_save_path, args.data_name)
+                    save_file_name += 'checkpoint.pth.tar'
+                    if val_ce_loss < best_val_loss:
+                        write_log(logger, 'Checkpoint saving...')
+                        torch.save({
+                            'epoch': epoch,
+                            'model': model.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                            'scheduler': scheduler.state_dict(),
+                            'scaler': scaler.state_dict()
+                        }, save_file_name)
+                        best_val_loss = val_ce_loss
+                        best_epoch = epoch
+                    else:
+                        else_log = f'Still {best_epoch} epoch Loss({round(best_val_loss.item(), 2)}) is better...'
+                        write_log(logger, else_log)
 
     # 3) Results
     write_log(logger, f'Best Epoch: {best_epoch}')

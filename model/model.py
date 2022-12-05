@@ -6,11 +6,13 @@ from torch.cuda.amp import autocast
 from torch.nn import functional as F
 # Import Huggingface
 from transformers import BertConfig, BertModel
+from transformers import DebertaConfig, DebertaForSequenceClassification
+from transformers import AlbertConfig, AlbertForSequenceClassification
 
 class AugModel(nn.Module):
     def __init__(self, encoder_model_type: str = 'bert', decoder_model_type: str = 'bert',
                  isPreTrain: bool = True, z_variation: float = 2, 
-                 src_max_len: int = 768, dropout: float = 0.3):
+                 dropout: float = 0.3):
         super().__init__()
 
         """
@@ -32,11 +34,15 @@ class AugModel(nn.Module):
         self.encoder_model_type = encoder_model_type
         self.decoder_model_type = decoder_model_type
 
-        # Token index
+        # Token index & dimension
         self.model_config = BertConfig.from_pretrained('bert-base-cased')
         self.pad_idx = self.model_config.pad_token_id
         self.bos_idx = self.model_config.bos_token_id
         self.eos_idx = self.model_config.eos_token_id
+
+        self.d_hidden = self.model_config.hidden_size
+        self.d_embedding = int(self.model_config.hidden_size / 2)
+        self.vocab_num = self.model_config.vocab_size
 
         # Encoder Model Setting
         if self.encoder_model_type == 'bert':
@@ -54,9 +60,9 @@ class AugModel(nn.Module):
             else:
                 self.decoder_model = BertModel(config=self.model_config)
 
-            self.decoder_linear1 = nn.Linear(self.model_config.hidden_size, 256)
-            self.decoder_norm = nn.LayerNorm(256, eps=1e-12)
-            self.decoder_linear2 = nn.Linear(256, self.model_config.vocab_size)
+            self.decoder_linear1 = nn.Linear(self.d_hidden, self.d_embedding)
+            self.decoder_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
+            self.decoder_linear2 = nn.Linear(self.d_embedding, self.vocab_num)
         else:
             raise Exception('''It's not ready...''')
 
@@ -70,10 +76,10 @@ class AugModel(nn.Module):
         encoder_out = encoder_out['last_hidden_state']
 
         # Sampling Z
-        z = self.z_variation * Variable(encoder_out.data.new(encoder_out.size()).normal_())
+        z = self.z_variation * torch.rand_like(encoder_out)
 
         # Decoding
-        decoder_out = self.decoder_model(inputs_embeds=encoder_out, 
+        decoder_out = self.decoder_model(inputs_embeds=encoder_out + z, 
                                          attention_mask=src_attention_mask,
                                          token_type_ids=src_token_type_ids)
         decoder_out = decoder_out['last_hidden_state']
@@ -91,11 +97,38 @@ class AugModel(nn.Module):
                                          token_type_ids=src_token_type_ids)
         encoder_out = encoder_out['last_hidden_state']
 
-        # Sampling Z
-        z = (self.z_variation*2) * Variable(encoder_out.data.new(encoder_out.size()).normal_())
+        z = (self.z_variation*2) * torch.rand_like(encoder_out)
 
         # Decoding
-        decoder_out = self.dropout(F.gelu(self.decoder_linear1(encoder_out)))
+        decoder_out = self.decoder_model(inputs_embeds=encoder_out + z, 
+                                         attention_mask=src_attention_mask,
+                                         token_type_ids=src_token_type_ids)
+        decoder_out = decoder_out['last_hidden_state']
+        
+        decoder_out = self.dropout(F.gelu(self.decoder_linear1(decoder_out)))
         decoder_out = self.decoder_linear2(self.decoder_norm(decoder_out))
 
         return decoder_out
+
+class ClsModel(nn.Module):
+    def __init__(self, model_type: str = 'deberta', num_labels: int = 2):
+        super().__init__()
+
+        self.model_type = model_type
+        self.num_labels = num_labels
+
+        # Token index & dimension
+        if self.model_type == 'deberta':
+            self.model_config = DebertaConfig.from_pretrained('hf-internal-testing/tiny-random-deberta')
+            self.cls_model = DebertaForSequenceClassification.from_pretrained("hf-internal-testing/tiny-random-deberta", num_labels=self.num_labels)
+        if self.model_type == 'albert':
+            self.model_config = AlbertConfig.from_pretrained('textattack/albert-base-v2-imdb')
+            self.cls_model = AlbertForSequenceClassification.from_pretrained("textattack/albert-base-v2-imdb", num_labels=self.num_labels)
+
+    @autocast
+    def forward(self, src_input_ids, src_attention_mask):
+        model_out = self.model(input_ids=src_input_ids, 
+                               attention_mask=src_attention_mask)
+        model_out = model_out['logits']
+
+        return model_out
