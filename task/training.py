@@ -142,7 +142,8 @@ def training(args):
     scheduler = shceduler_select(optimizer, dataloader_dict, args)
     cudnn.benchmark = True
     scaler = GradScaler()
-    recon_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=model.pad_idx).to(device)
+    cls_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps).to(device)
+    recon_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=aug_model.pad_idx).to(device)
 
     # 3) Model resume
     start_epoch = 0
@@ -153,7 +154,8 @@ def training(args):
                                         f'checkpoint_src_{args.src_vocab_size}_trg_{args.trg_vocab_size}_v_{args.variational_mode}_p_{args.parallel}.pth.tar')
         checkpoint = torch.load(save_file_name)
         start_epoch = checkpoint['epoch'] - 1
-        model.load_state_dict(checkpoint['model'])
+        aug_model.load_state_dict(checkpoint['aug_model'])
+        cls_model.load_state_dict(checkpoint['cls_model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         scheduler.load_state_dict(checkpoint['scheduler'])
         scaler.load_state_dict(checkpoint['scaler'])
@@ -172,13 +174,8 @@ def training(args):
             finish_epoch = False
             for phase in ['train', 'valid']:
                 if 'train' in phase:
-                    model.train()
-                else:
-                    write_log(logger, 'Validation start...')
-                    val_mmd_loss = 0
-                    val_ce_loss = 0
-                    val_acc = 0
-                    model.eval()
+                    aug_model.train()
+                    cls_model.train()
 
                 # Optimizer setting
                 optimizer.zero_grad(set_to_none=True)
@@ -219,40 +216,57 @@ def training(args):
 
                     # Reconsturction setting
                     trg_sequence_gold = src_sequence.contiguous().view(-1)
-                    non_pad = trg_sequence_gold != model.pad_idx
+                    non_pad = trg_sequence_gold != aug_model.pad_idx
 
-                    # Train
-                    if phase == 'train':
-                        with autocast():
-                            encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
+                    # Classifier training
+                    with autocast():
+                        logit = cls_model(src_input_ids=src_sequence,
+                                          src_attention_mask=src_att)
+                        cls_loss = recon_loss(logit, trg_label)/args.num_grad_accumulate
+
+                    scaler.scale(cls_loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+
+                    # Augmenter training
+                    with autocast():
+                        encoder_out, decoder_out, z = aug_model(src_input_ids=src_sequence, 
                                                                 src_attention_mask=src_att,
                                                                 src_token_type_ids=src_seg)
-                            mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
-                                                            z.view(args.batch_size, -1), 
-                                                            z_var=args.z_variation) * 10
-                            ce_loss = recon_loss(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
-                            total_loss = mmd_loss + ce_loss
+                        mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
+                                                          z.view(args.batch_size, -1), 
+                                                          z_var=args.z_variation) * 10
+                        ce_loss = recon_loss(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
+                        total_loss = mmd_loss + ce_loss
 
-                        scaler.scale(total_loss).backward()
-                        if args.clip_grad_norm > 0:
-                            scaler.unscale_(optimizer)
-                            clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-                        scaler.step(optimizer)
-                        scaler.update()
+                    scaler.scale(total_loss).backward()
+                    if args.clip_grad_norm > 0:
+                        scaler.unscale_(optimizer)
+                        clip_grad_norm_(aug_model.parameters(), args.clip_grad_norm)
+                    scaler.step(optimizer)
+                    scaler.update()
 
-                        if args.scheduler in ['constant', 'warmup']:
-                            scheduler.step()
-                        if args.scheduler == 'reduce_train':
-                            scheduler.step(total_loss)
+                    if args.scheduler in ['constant', 'warmup']:
+                        scheduler.step()
+                    if args.scheduler == 'reduce_train':
+                        scheduler.step(total_loss)
 
-                        # Print loss value only training
-                        if i == 0 or freq == args.print_freq or i==(len(dataloader_dict[phase])-1):
-                            acc = (decoder_out.argmax(dim=2).view(-1)[non_pad] == trg_sequence_gold[non_pad]).sum() / len(trg_sequence_gold[non_pad])
-                            iter_log = "[Epoch:%03d][%03d/%03d] train_ce_loss:%03.2f | train_mmd_loss:%03.2f | train_acc:%03.2f%% | learning_rate:%1.6f | spend_time:%02.2fmin" % \
-                                (epoch, i+1, len(dataloader_dict[phase]), ce_loss.item(), mmd_loss.item(), acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
-                            write_log(logger, iter_log)
-                            freq = 0
-                        freq += 1
+                    # Print loss value only training
+                    if i == 0 or freq == args.print_freq or i==(len(dataloader_dict[phase])-1):
+                        acc = (decoder_out.argmax(dim=2).view(-1)[non_pad] == trg_sequence_gold[non_pad]).sum() / len(trg_sequence_gold[non_pad])
+                        iter_log = "[Epoch:%03d][%03d/%03d] train_ce_loss:%03.2f | train_mmd_loss:%03.2f | train_acc:%03.2f%% | learning_rate:%1.6f | spend_time:%02.2fmin" % \
+                            (epoch, i+1, len(dataloader_dict[phase]), ce_loss.item(), mmd_loss.item(), acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                        write_log(logger, iter_log)
+                        freq = 0
+                    freq += 1
+
+                else:
+                    write_log(logger, 'Validation start...')
+                    val_mmd_loss = 0
+                    val_ce_loss = 0
+                    val_acc = 0
+                    aug_model.eval()
+                    cls_model.train()
 
                     # Validation
                     if phase == 'valid':
