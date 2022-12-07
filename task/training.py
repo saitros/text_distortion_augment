@@ -26,6 +26,7 @@ from model.dataset import CustomDataset
 from model.loss import MaximumMeanDiscrepancy
 from optimizer.utils import shceduler_select, optimizer_select
 from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
+from task.utils import input_to_device
 
 def training(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -172,11 +173,16 @@ def training(args):
         while True:
             start_time_e = time()
             finish_epoch = False
-            for phase in ['train', 'valid']:
-                if 'train' in phase:
-                    aug_model.train()
-                    cls_model.train()
+            for phase in ['cls_train', 'cls_valid', 'aug_train', 'aug_valid']:
 
+                if 'train' in phase:
+                    cls_model.train()
+                    aug_model.train()
+                if 'valid' in phase:
+                    cls_model.eval()
+                    aug_model.eval()
+
+                # 1. Classifier training
                 # Optimizer setting
                 optimizer.zero_grad(set_to_none=True)
 
@@ -193,26 +199,9 @@ def training(args):
                         finish_epoch = True
 
                     # Input setting
-                    src_sequence = batch_iter[0]
-                    src_att = batch_iter[1]
-                    src_seg = batch_iter[2]
-                    trg_label = batch_iter[3]
-
-                    src_sequence = src_sequence.to(device, non_blocking=True)
-                    src_att = src_att.to(device, non_blocking=True)
-                    src_seg = src_seg.to(device, non_blocking=True)
-                    trg_label = trg_label.to(device, non_blocking=True)
-
-                    # Augmentation input setting
-                    aug_src_sequence = aug_batch_iter[0]
-                    aug_src_att = aug_batch_iter[1]
-                    aug_src_seg = aug_batch_iter[2]
-                    aug_trg_label = aug_batch_iter[3]
-
-                    aug_src_sequence = aug_src_sequence.to(device, non_blocking=True)
-                    aug_src_att = aug_src_att.to(device, non_blocking=True)
-                    aug_src_seg = aug_src_seg.to(device, non_blocking=True)
-                    aug_trg_label = aug_trg_label.to(device, non_blocking=True)
+                    b_iter, aug_b_iter = input_to_device(batch_iter, aug_batch_iter, device)
+                    src_sequence, src_att, src_seg, trg_label = b_iter
+                    aug_src_sequence, aug_src_att, aug_src_seg, aug_trg_label = aug_b_iter
 
                     # Reconsturction setting
                     trg_sequence_gold = src_sequence.contiguous().view(-1)
@@ -225,8 +214,9 @@ def training(args):
                         cls_loss = recon_loss(logit, trg_label)/args.num_grad_accumulate
 
                     scaler.scale(cls_loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
+                    
+                scaler.step(optimizer)
+                scaler.update()
 
                     # Augmenter training
                     with autocast():
