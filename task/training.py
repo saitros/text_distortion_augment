@@ -183,7 +183,6 @@ def training(args):
                     aug_model.eval()
 
                 # 1. Classifier training
-                # Optimizer setting
                 optimizer.zero_grad(set_to_none=True)
 
                 for _ in range(args.num_grad_accumulate):
@@ -203,10 +202,6 @@ def training(args):
                     src_sequence, src_att, src_seg, trg_label = b_iter
                     aug_src_sequence, aug_src_att, aug_src_seg, aug_trg_label = aug_b_iter
 
-                    # Reconsturction setting
-                    trg_sequence_gold = src_sequence.contiguous().view(-1)
-                    non_pad = trg_sequence_gold != aug_model.pad_idx
-
                     # Classifier training
                     with autocast():
                         logit = cls_model(src_input_ids=src_sequence,
@@ -218,37 +213,57 @@ def training(args):
                 scaler.step(optimizer)
                 scaler.update()
 
-                    # Augmenter training
-                    with autocast():
-                        encoder_out, decoder_out, z = aug_model(src_input_ids=src_sequence, 
-                                                                src_attention_mask=src_att,
-                                                                src_token_type_ids=src_seg)
-                        mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
-                                                          z.view(args.batch_size, -1), 
-                                                          z_var=args.z_variation) * 10
-                        ce_loss = recon_loss(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
-                        total_loss = mmd_loss + ce_loss
+                # 2. Augmentation training
+                optimizer.zero_grad(set_to_none=True)
 
-                    scaler.scale(total_loss).backward()
-                    if args.clip_grad_norm > 0:
-                        scaler.unscale_(optimizer)
-                        clip_grad_norm_(aug_model.parameters(), args.clip_grad_norm)
-                    scaler.step(optimizer)
-                    scaler.update()
+                for _ in range(args.num_grad_accumulate):
 
-                    if args.scheduler in ['constant', 'warmup']:
-                        scheduler.step()
-                    if args.scheduler == 'reduce_train':
-                        scheduler.step(total_loss)
+                    try:
+                        batch_iter = next(dataloader_dict['train'])
+                        aug_batch_iter = next(dataloader_dict['aug_train'])
+                    except StopIteration:
+                        batch_iter = iter(dataloader_dict['train'])
+                        aug_batch_iter = iter(dataloader_dict['aug_train'])
+                        batch_iter = next(dataloader_dict['train'])
+                        aug_batch_iter = next(dataloader_dict['aug_train'])
+                        finish_epoch = True
 
-                    # Print loss value only training
-                    if i == 0 or freq == args.print_freq or i==(len(dataloader_dict[phase])-1):
-                        acc = (decoder_out.argmax(dim=2).view(-1)[non_pad] == trg_sequence_gold[non_pad]).sum() / len(trg_sequence_gold[non_pad])
-                        iter_log = "[Epoch:%03d][%03d/%03d] train_ce_loss:%03.2f | train_mmd_loss:%03.2f | train_acc:%03.2f%% | learning_rate:%1.6f | spend_time:%02.2fmin" % \
-                            (epoch, i+1, len(dataloader_dict[phase]), ce_loss.item(), mmd_loss.item(), acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
-                        write_log(logger, iter_log)
-                        freq = 0
-                    freq += 1
+                    # Input setting
+                    b_iter, aug_b_iter = input_to_device(batch_iter, aug_batch_iter, device)
+                    src_sequence, src_att, src_seg, trg_label = b_iter
+                    aug_src_sequence, aug_src_att, aug_src_seg, aug_trg_label = aug_b_iter
+
+                # Augmenter training
+                with autocast():
+                    encoder_out, decoder_out, z = aug_model(src_input_ids=src_sequence, 
+                                                            src_attention_mask=src_att,
+                                                            src_token_type_ids=src_seg)
+                    mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
+                                                        z.view(args.batch_size, -1), 
+                                                        z_var=args.z_variation) * 10
+                    ce_loss = recon_loss(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
+                    total_loss = mmd_loss + ce_loss
+
+                scaler.scale(total_loss).backward()
+                if args.clip_grad_norm > 0:
+                    scaler.unscale_(optimizer)
+                    clip_grad_norm_(aug_model.parameters(), args.clip_grad_norm)
+                scaler.step(optimizer)
+                scaler.update()
+
+                if args.scheduler in ['constant', 'warmup']:
+                    scheduler.step()
+                if args.scheduler == 'reduce_train':
+                    scheduler.step(total_loss)
+
+                # Print loss value only training
+                if i == 0 or freq == args.print_freq or i==(len(dataloader_dict[phase])-1):
+                    acc = (decoder_out.argmax(dim=2).view(-1)[non_pad] == trg_sequence_gold[non_pad]).sum() / len(trg_sequence_gold[non_pad])
+                    iter_log = "[Epoch:%03d][%03d/%03d] train_ce_loss:%03.2f | train_mmd_loss:%03.2f | train_acc:%03.2f%% | learning_rate:%1.6f | spend_time:%02.2fmin" % \
+                        (epoch, i+1, len(dataloader_dict[phase]), ce_loss.item(), mmd_loss.item(), acc*100, optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                    write_log(logger, iter_log)
+                    freq = 0
+                freq += 1
 
                 else:
                     write_log(logger, 'Validation start...')
