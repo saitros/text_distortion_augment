@@ -5,7 +5,7 @@ from torch.autograd import Variable
 from torch.cuda.amp import autocast
 from torch.nn import functional as F
 # Import Huggingface
-from transformers import BertConfig, BertModel
+from transformers import BertConfig, BertModel, BertForSequenceClassification
 from transformers import DebertaConfig, DebertaForSequenceClassification
 from transformers import AlbertConfig, AlbertForSequenceClassification
 
@@ -111,13 +111,16 @@ class AugModel(nn.Module):
         return decoder_out
 
 class ClsModel(nn.Module):
-    def __init__(self, model_type: str = 'deberta', num_labels: int = 2):
+    def __init__(self, model_type: str = 'bert', num_labels: int = 2):
         super().__init__()
 
         self.model_type = model_type
         self.num_labels = num_labels
 
         # Token index & dimension
+        if self.model_type == 'bert':
+            self.model_config = BertConfig.from_pretrained('bert-base-cased')
+            self.cls_model = BertForSequenceClassification.from_pretrained('bert-base-cased', num_labels=self.num_labels)
         if self.model_type == 'deberta':
             self.model_config = DebertaConfig.from_pretrained('hf-internal-testing/tiny-random-deberta')
             self.cls_model = DebertaForSequenceClassification.from_pretrained("hf-internal-testing/tiny-random-deberta", num_labels=self.num_labels)
@@ -125,10 +128,15 @@ class ClsModel(nn.Module):
             self.model_config = AlbertConfig.from_pretrained('textattack/albert-base-v2-imdb')
             self.cls_model = AlbertForSequenceClassification.from_pretrained("textattack/albert-base-v2-imdb", num_labels=self.num_labels)
 
-    @autocast
-    def forward(self, src_input_ids, src_attention_mask):
-        model_out = self.model(input_ids=src_input_ids, 
-                               attention_mask=src_attention_mask)
+    @autocast()
+    def forward(self, src_input_ids, src_attention_mask, src_token_type_ids):
+        if self.model_type == 'bert':
+            model_out = self.cls_model(input_ids=src_input_ids, 
+                                       attention_mask=src_attention_mask,
+                                       token_type_ids=src_token_type_ids)
+        else:
+            model_out = self.cls_model(input_ids=src_input_ids, 
+                                       attention_mask=src_attention_mask)
         model_out = model_out['logits']
 
         return model_out

@@ -5,7 +5,7 @@ from .scheduler import WarmupLinearSchedule
 
 from transformers import AdamW
 
-def optimizer_select(model, args):
+def optimizer_select(model, phase, args):
     no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
@@ -29,15 +29,22 @@ def optimizer_select(model, args):
         raise Exception("Choose optimizer in ['AdamW', 'Adam', 'SGD', 'Ralamb']")
     return optimizer
 
-def shceduler_select(optimizer, dataloader_dict, args):
+def shceduler_select(optimizer, dataloader_dict, phase, args):
+    # Phase setting
+    if phase == 'cls':
+        len_ = len(dataloader_dict['train'])
+    if phase == 'aug':
+        len_ = len(dataloader_dict['aug_train'])
+
+    # Scheduler setting
     if args.scheduler == 'constant':
-        scheduler = StepLR(optimizer, step_size=len(dataloader_dict['train']), gamma=1)
+        scheduler = StepLR(optimizer, step_size=len_, gamma=1)
     elif args.scheduler == 'warmup':
         scheduler = WarmupLinearSchedule(optimizer, 
-                                        warmup_steps=int(len(dataloader_dict['train'])*args.n_warmup_epochs), 
-                                        t_total=len(dataloader_dict['train'])*args.num_epochs)
+                                        warmup_steps=int(len_*args.n_warmup_epochs), 
+                                        t_total=len_*args.num_epochs)
     elif args.scheduler == 'reduce_train':
-        scheduler = ReduceLROnPlateau(optimizer, 'min', patience=int(len(dataloader_dict['train'])*1.5),
+        scheduler = ReduceLROnPlateau(optimizer, 'min', patience=int(len_*1.5),
                                       factor=0.5)
     elif args.scheduler == 'reduce_valid':
         scheduler = ReduceLROnPlateau(optimizer, 'min', patience=50, factor=0.5)

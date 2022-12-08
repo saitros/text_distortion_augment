@@ -48,7 +48,8 @@ def data_load(args):
 
     return src_list, trg_list
 
-def input_to_device(batch_iter, aug_batch_iter, device):
+def input_to_device(batch_iter, device):
+
     src_sequence = batch_iter[0]
     src_att = batch_iter[1]
     src_seg = batch_iter[2]
@@ -58,16 +59,5 @@ def input_to_device(batch_iter, aug_batch_iter, device):
     src_att = src_att.to(device, non_blocking=True)
     src_seg = src_seg.to(device, non_blocking=True)
     trg_label = trg_label.to(device, non_blocking=True)
-
-    # Augmentation input setting
-    aug_src_sequence = aug_batch_iter[0]
-    aug_src_att = aug_batch_iter[1]
-    aug_src_seg = aug_batch_iter[2]
-    aug_trg_label = aug_batch_iter[3]
-
-    aug_src_sequence = aug_src_sequence.to(device, non_blocking=True)
-    aug_src_att = aug_src_att.to(device, non_blocking=True)
-    aug_src_seg = aug_src_seg.to(device, non_blocking=True)
-    aug_trg_label = aug_trg_label.to(device, non_blocking=True)
     
-    return (src_sequence, src_att, src_seg, trg_label), (aug_src_sequence, aug_src_att, aug_src_seg, aug_trg_label)
+    return src_sequence, src_att, src_seg, trg_label
