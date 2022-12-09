@@ -260,7 +260,7 @@ def training(args):
                                                             src_attention_mask=aug_src_att,
                                                             src_token_type_ids=aug_src_seg)
                     mmd_loss = MaximumMeanDiscrepancy(z.view(args.batch_size, -1), 
-                                                        z_var=args.z_variation) * 10
+                                                      z_var=args.z_variation) * 10
                     ce_loss = recon_loss(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
                 # Augmenting
@@ -278,7 +278,7 @@ def training(args):
                         confidence = softmax(logit)
 
                 new_loss = torch.exp(ood_trg_list - confidence)
-                new_loss = new_loss.mean()
+                new_loss = new_loss.mean() * 10
                 new_loss.requires_grad_(True)
         
                 total_loss = mmd_loss + ce_loss + new_loss
@@ -352,9 +352,8 @@ def training(args):
                 encoder_out, decoder_out, z = aug_model(src_input_ids=src_sequence, 
                                                         src_attention_mask=src_att,
                                                         src_token_type_ids=src_seg)
-                mmd_loss = MaximumMeanDiscrepancy(encoder_out.view(args.batch_size, -1), 
-                                                z.view(args.batch_size, -1), 
-                                                z_var=args.z_variation) * 10
+                mmd_loss = MaximumMeanDiscrepancy(z.view(args.batch_size, -1), 
+                                                  z_var=args.z_variation) * 10
                 ce_loss = F.cross_entropy(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
                 val_mmd_loss += mmd_loss
                 val_ce_loss += ce_loss
