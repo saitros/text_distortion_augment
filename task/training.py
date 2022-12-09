@@ -54,7 +54,7 @@ def training(args):
 
     save_path = os.path.join(args.preprocess_path, args.data_name)
 
-    with h5py.File(os.path.join(save_path, args.cls_tokenizer, 'processed.hdf5'), 'r') as f:
+    with h5py.File(os.path.join(save_path, args.cls_model, 'processed.hdf5'), 'r') as f:
         train_src_input_ids = f.get('train_src_input_ids')[:]
         train_src_attention_mask = f.get('train_src_attention_mask')[:]
         train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
@@ -66,7 +66,7 @@ def training(args):
         valid_trg_list = f.get('valid_label')[:]
         valid_trg_list = F.one_hot(torch.tensor(valid_trg_list, dtype=torch.long)).numpy()
     
-    with h5py.File(os.path.join(save_path, args.aug_tokenizer, 'processed.hdf5'), 'r') as f:
+    with h5py.File(os.path.join(save_path, args.aug_model, 'processed.hdf5'), 'r') as f:
         aug_train_src_input_ids = f.get('train_src_input_ids')[:]
         aug_train_src_attention_mask = f.get('train_src_attention_mask')[:]
         aug_train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
@@ -78,7 +78,7 @@ def training(args):
         aug_valid_trg_list = f.get('valid_label')[:]
         aug_valid_trg_list = F.one_hot(torch.tensor(valid_trg_list, dtype=torch.long)).numpy()
 
-    with open(os.path.join(save_path, args.cls_tokenizer, 'word2id.pkl'), 'rb') as f:
+    with open(os.path.join(save_path, args.cls_model, 'word2id.pkl'), 'rb') as f:
         data_ = pickle.load(f)
         src_word2id = data_['src_word2id']
         src_vocab_num = len(src_word2id)
@@ -97,7 +97,7 @@ def training(args):
     aug_model = AugModel(encoder_model_type='bert', decoder_model_type='bert',
                          isPreTrain=args.isPreTrain, z_variation=args.z_variation,
                          dropout=args.dropout)
-    cls_model = ClsModel(model_type=args.cls_model_type, num_labels=num_labels)
+    cls_model = ClsModel(model_type=args.cls_model, num_labels=num_labels)
 
     aug_model.to(device)
     cls_model.to(device)

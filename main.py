@@ -58,7 +58,7 @@ if __name__=='__main__':
                         help='Use pre-trained language model; Default is True')
     parser.add_argument('--aug_model', default='bert', type=str,
                         help='')
-    parser.add_argument('--cls_model', default='deberta', type=str,
+    parser.add_argument('--cls_model', default='bert', type=str,
                         help='')
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
@@ -80,6 +80,8 @@ if __name__=='__main__':
                         help='Training epochs; Default is 5')
     parser.add_argument('--num_workers', default=8, type=int, 
                         help='Num CPU Workers; Default is 8')
+    parser.add_argument('--num_grad_accumulate', default=5, type=int,
+                        help='')
     parser.add_argument('--batch_size', default=16, type=int,    
                         help='Batch size; Default is 16')
     parser.add_argument('--lr', default=5e-4, type=float,
