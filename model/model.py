@@ -53,6 +53,10 @@ class AugModel(nn.Module):
         else:
             raise Exception('''It's not ready...''')
 
+        # Linear reduction
+        self.linear_encoding = nn.Linear(self.d_hidden, self.d_embedding)
+        self.linear_decoding = nn.Linear(self.d_embedding, self.d_hidden)
+
         # Decoder Model Setting
         if self.decoder_model_type == 'bert':
             if self.isPreTrain:
@@ -75,40 +79,43 @@ class AugModel(nn.Module):
                                          token_type_ids=src_token_type_ids)
         encoder_out = encoder_out['last_hidden_state']
 
-        # Sampling Z
-        z = self.z_variation * torch.rand_like(encoder_out)
+        # Linear encoding
+        z = self.linear_encoding(encoder_out)
+        decoder_in = self.linear_decoding(z)
 
         # Decoding
-        decoder_out = self.decoder_model(inputs_embeds=encoder_out + z, 
-                                         attention_mask=src_attention_mask,
-                                         token_type_ids=src_token_type_ids)
-        decoder_out = decoder_out['last_hidden_state']
+        # decoder_out = self.decoder_model(inputs_embeds=decoder_in, 
+        #                                  attention_mask=src_attention_mask,
+        #                                  token_type_ids=src_token_type_ids)
+        # decoder_out = decoder_out['last_hidden_state']
         
-        decoder_out = self.dropout(F.gelu(self.decoder_linear1(decoder_out)))
+        decoder_out = self.dropout(F.gelu(self.decoder_linear1(decoder_in)))
         decoder_out = self.decoder_linear2(self.decoder_norm(decoder_out))
 
         return encoder_out, decoder_out, z
 
-    @autocast()
-    def generate(self, src_input_ids, src_attention_mask, src_token_type_ids):
-        # Encoding
-        encoder_out = self.encoder_model(input_ids=src_input_ids, 
-                                         attention_mask=src_attention_mask,
-                                         token_type_ids=src_token_type_ids)
-        encoder_out = encoder_out['last_hidden_state']
+    # @autocast()
+    # def generate(self, src_input_ids, src_attention_mask, src_token_type_ids):
+    #     # Encoding
+    #     encoder_out = self.encoder_model(input_ids=src_input_ids, 
+    #                                      attention_mask=src_attention_mask,
+    #                                      token_type_ids=src_token_type_ids)
+    #     encoder_out = encoder_out['last_hidden_state']
 
-        z = (self.z_variation*2) * torch.rand_like(encoder_out)
+    #     # WAE Encoding
 
-        # Decoding
-        decoder_out = self.decoder_model(inputs_embeds=encoder_out + z, 
-                                         attention_mask=src_attention_mask,
-                                         token_type_ids=src_token_type_ids)
-        decoder_out = decoder_out['last_hidden_state']
+    #     z = (self.z_variation*2) * torch.rand_like(encoder_out)
+
+    #     # Decoding
+    #     decoder_out = self.decoder_model(inputs_embeds=encoder_out + z, 
+    #                                      attention_mask=src_attention_mask,
+    #                                      token_type_ids=src_token_type_ids)
+    #     decoder_out = decoder_out['last_hidden_state']
         
-        decoder_out = self.dropout(F.gelu(self.decoder_linear1(decoder_out)))
-        decoder_out = self.decoder_linear2(self.decoder_norm(decoder_out))
+    #     decoder_out = self.dropout(F.gelu(self.decoder_linear1(decoder_out)))
+    #     decoder_out = self.decoder_linear2(self.decoder_norm(decoder_out))
 
-        return decoder_out
+    #     return decoder_out
 
 class ClsModel(nn.Module):
     def __init__(self, model_type: str = 'bert', num_labels: int = 2):

@@ -1,4 +1,6 @@
 import math
+import torch
+from torch.autograd import Variable
 
 def im_kernel_sum(z1, z2, z_var, exclude_diag=True):
     r"""Calculate sum of sample-wise measures of inverse multiquadratics kernel described in the WAE paper.
@@ -26,7 +28,7 @@ def im_kernel_sum(z1, z2, z_var, exclude_diag=True):
 
     return kernel_sum
 
-def MaximumMeanDiscrepancy(z_tilde, z, z_var):
+def MaximumMeanDiscrepancy(z_tilde, z_var):
     r"""Calculate maximum mean discrepancy described in the WAE paper.
     Args:
         z_tilde (Tensor): samples from deterministic non-random encoder Q(Z|X).
@@ -34,8 +36,7 @@ def MaximumMeanDiscrepancy(z_tilde, z, z_var):
         z (Tensor): samples from prior distributions. same shape with z_tilde.
         z_var (Number): scalar variance of isotropic gaussian prior P(Z).
     """
-    assert z_tilde.size() == z.size()
-    assert z.ndimension() == 2
+    z = Variable(z_tilde.data.new(z_tilde.size()).normal_(std=z_var))
 
     n = z.size(0)
     out = im_kernel_sum(z, z, z_var, exclude_diag=True).div(n*(n-1)) + \
