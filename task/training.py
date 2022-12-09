@@ -141,10 +141,10 @@ def training(args):
     #     train_src_input_ids, train_src_attention_mask, train_src_token_type_ids, train_trg_list,
     #     valid_src_input_ids, valid_src_attention_mask, valid_src_token_type_ids, valid_trg_list
     # )
-    
+
     # 3) Optimizer & Learning rate scheduler setting
-    cls_optimizer = optimizer_select(model=cls_model, phase='cls', args=args)
-    aug_optimizer = optimizer_select(model=aug_model, phase='aug', args=args)
+    cls_optimizer = optimizer_select(optimizer_model=args.optimizer, model=cls_model, phase='cls', args=args)
+    aug_optimizer = optimizer_select(optimizer_model=args.optimizer, model=aug_model, phase='aug', args=args)
     # cls_scheduler = shceduler_select(optimizer=cls_optimizer, dataloader_dict=dataloader_dict, 
     #                                  phase='cls', args=args)
     # aug_scheduler = shceduler_select(optimizer=aug_optimizer, dataloader_dict=dataloader_dict, 
