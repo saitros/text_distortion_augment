@@ -119,16 +119,16 @@ def training(args):
     }
     dataloader_dict = {
         'train': DataLoader(dataset_dict['train'], drop_last=False,
-                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                            batch_size=args.batch_size, shuffle=True, pin_memory=True,
                             num_workers=args.num_workers),
         'valid': DataLoader(dataset_dict['valid'], drop_last=False,
-                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                            batch_size=args.batch_size, shuffle=True, pin_memory=True,
                             num_workers=args.num_workers),
         'aug_train': DataLoader(dataset_dict['aug_train'], drop_last=False,
-                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                            batch_size=args.batch_size, shuffle=True, pin_memory=True,
                             num_workers=args.num_workers),
         'aug_valid': DataLoader(dataset_dict['aug_valid'], drop_last=False,
-                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                            batch_size=args.batch_size, shuffle=True, pin_memory=True,
                             num_workers=args.num_workers)
     }
     tokenizer_dict = {
@@ -290,8 +290,12 @@ def training(args):
                 
             # Print loss value only training
             if freq % args.print_freq == 0 or finish_epoch:
-                iter_log = "[Epoch:%03d][%03d/%03d] train_ce_loss:%03.2f | train_mmd_loss:%03.2f | train_new_loss:%03.2f | learning_rate:%1.6f | spend_time:%02.2fmin" % \
-                    (epoch, freq+1, len(dataloader_dict['train']), ce_loss.item(), mmd_loss.item(), new_loss.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                if freq == 0:
+                    printing_freq = freq + 1
+                else:
+                    printing_freq = freq
+                iter_log = "[Epoch:%03d][%03d/%03d] train_cls_loss:%03.2f | train_recon_loss:%03.2f | train_mmd_loss:%03.2f | train_new_loss:%03.2f | learning_rate:%1.6f | spend_time:%02.2fmin" % \
+                    (epoch, printing_freq, len(dataloader_dict['train']), cls_loss_.item(), ce_loss.item(), mmd_loss.item(), new_loss.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                 write_log(logger, iter_log)
             freq += 1
 
@@ -324,7 +328,7 @@ def training(args):
                     cls_loss_ = cls_loss(logit, trg_label)
             
             val_cls_loss += cls_loss_
-            val_acc += (logit.argmax(dim=1) == trg_label).sum() / len(trg_label)
+            val_acc += (logit.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
 
         val_cls_loss /= len(dataloader_dict['valid'])
         val_acc /= len(dataloader_dict['valid'])
