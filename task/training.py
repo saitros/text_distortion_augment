@@ -74,9 +74,9 @@ def training(args):
         aug_valid_src_attention_mask = f.get('valid_src_attention_mask')[:]
         aug_valid_src_token_type_ids = f.get('valid_src_token_type_ids')[:]
         aug_train_trg_list = f.get('train_label')[:]
-        aug_train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
+        aug_train_trg_list = F.one_hot(torch.tensor(aug_train_trg_list, dtype=torch.long)).numpy()
         aug_valid_trg_list = f.get('valid_label')[:]
-        aug_valid_trg_list = F.one_hot(torch.tensor(valid_trg_list, dtype=torch.long)).numpy()
+        aug_valid_trg_list = F.one_hot(torch.tensor(aug_valid_trg_list, dtype=torch.long)).numpy()
 
     with open(os.path.join(save_path, args.cls_model, 'word2id.pkl'), 'rb') as f:
         data_ = pickle.load(f)
@@ -339,7 +339,7 @@ def training(args):
         #=======Augmenter Validation========#
         #===================================#
         write_log(logger, 'Augmenter Validation start...')
-        for batch_iter in tqdm(dataloader_dict['aug_valid'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}'):
+        for aug_batch_iter in tqdm(dataloader_dict['aug_valid'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}'):
 
             aug_b_iter = input_to_device(aug_batch_iter, device=device)
             aug_src_sequence, aug_src_att, aug_src_seg, _ = aug_b_iter
@@ -369,9 +369,9 @@ def training(args):
         #===================================#
         #=========Text Augmentation=========#
         #===================================#
-        for batch_iter in tqdm(dataloader_dict['aug_train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}'):
-            aug_b_iter = input_to_device(aug_batch_iter, device=device)
-            aug_src_sequence, aug_src_att, aug_src_seg, trg_label = aug_b_iter
+        for i, batch_iter in enumerate(tqdm(dataloader_dict['aug_train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
+            b_iter = input_to_device(batch_iter, device=device)
+            aug_src_sequence, aug_src_att, aug_src_seg, trg_label = b_iter
             trg_label = trg_label.cpu().numpy()
 
             # Reconsturction setting
@@ -390,16 +390,23 @@ def training(args):
             augmented_tokenized = tokenizer_dict['cls'](augmented_output, return_tensors='np',
                                                         max_length=args.src_max_len, padding='max_length', truncation=True)
             train_src_input_ids = np.concatenate((train_src_input_ids, augmented_tokenized['input_ids']))
-            train_src_attention_mask = np.concatenate((train_src_attention_mask, augmented_tokenized['attetntion_mask']))
+            train_src_attention_mask = np.concatenate((train_src_attention_mask, augmented_tokenized['attention_mask']))
             train_src_token_type_ids = np.concatenate((train_src_token_type_ids, augmented_tokenized['token_type_ids']))
             train_trg_list = np.concatenate((train_trg_list, trg_label))
+
+            if i % int(len(dataloader_dict['aug_train'])*0.3) == 0:
+                src_token = tokenizer_dict['aug'].batch_decode(aug_src_sequence, skip_special_tokens=True)[0]
+                aug_token = augmented_output[0]
+                write_log(logger, 'Generated Examples')
+                write_log(logger, f'Source: {src_token}')
+                write_log(logger, f'Augmented: {aug_token}')
 
         dataset_dict['train'] = CustomDataset(src_list=train_src_input_ids, src_att_list=train_src_attention_mask,
                                               src_seg_list=train_src_token_type_ids,
                                               trg_list=train_trg_list, src_max_len=args.src_max_len)
         dataloader_dict['train'] = DataLoader(dataset_dict['train'], drop_last=False,
                                               batch_size=args.batch_size, shuffle=False, pin_memory=True,
-                                              num_workers=args.num_workers),
+                                              num_workers=args.num_workers)
 
         save_file_name = os.path.join(args.model_save_path, args.data_name)
         save_file_name += 'checkpoint.pth.tar'

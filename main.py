@@ -57,9 +57,9 @@ if __name__=='__main__':
     parser.add_argument('--isPreTrain', default=True, type=str2bool,
                         help='Use pre-trained language model; Default is True')
     parser.add_argument('--aug_model', default='bert', type=str,
-                        help='')
+                        help='Augmentation model type; Default is BERT')
     parser.add_argument('--cls_model', default='bert', type=str,
-                        help='')
+                        help='Classification model type; Default is BERT')
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']
@@ -84,7 +84,9 @@ if __name__=='__main__':
                         help='')
     parser.add_argument('--batch_size', default=16, type=int,    
                         help='Batch size; Default is 16')
-    parser.add_argument('--lr', default=5e-4, type=float,
+    parser.add_argument('--cls_lr', default=5e-3, type=float,
+                        help='Maximum learning rate of warmup scheduler; Default is 5e-4')
+    parser.add_argument('--aug_lr', default=5e-3, type=float,
                         help='Maximum learning rate of warmup scheduler; Default is 5e-4')
     parser.add_argument('--w_decay', default=1e-5, type=float,
                         help="Ralamb's weight decay; Default is 1e-5")
