@@ -145,17 +145,18 @@ def training(args):
     # 3) Optimizer & Learning rate scheduler setting
     cls_optimizer = optimizer_select(optimizer_model=args.optimizer, model=cls_model, phase='cls', args=args)
     aug_optimizer = optimizer_select(optimizer_model=args.optimizer, model=aug_model, phase='aug', args=args)
-    # cls_scheduler = shceduler_select(optimizer=cls_optimizer, dataloader_dict=dataloader_dict, 
-    #                                  phase='cls', args=args)
-    # aug_scheduler = shceduler_select(optimizer=aug_optimizer, dataloader_dict=dataloader_dict, 
-    #                                  phase='aug', args=args)
+    cls_scheduler = shceduler_select(optimizer=cls_optimizer, dataloader_dict=dataloader_dict, 
+                                     phase='cls', args=args)
+    aug_scheduler = shceduler_select(optimizer=aug_optimizer, dataloader_dict=dataloader_dict, 
+                                     phase='aug', args=args)
     cls_total_iters = round(len(dataloader_dict['train'])/args.num_grad_accumulate*args.num_epochs)
     aug_total_iters = round(len(dataloader_dict['aug_train'])/args.num_grad_accumulate*args.num_epochs)
-    cls_scheduler = get_cosine_schedule_with_warmup(cls_optimizer, round(cls_total_iters*0.3), cls_total_iters) # args.warmup_ratio = 0.3 -> Need to fix
-    aug_scheduler = get_cosine_schedule_with_warmup(aug_optimizer, round(aug_total_iters*0.3), aug_total_iters)
+    # cls_scheduler = get_cosine_schedule_with_warmup(cls_optimizer, round(cls_total_iters*0.3), cls_total_iters) # args.warmup_ratio = 0.3 -> Need to fix
+    # aug_scheduler = get_cosine_schedule_with_warmup(aug_optimizer, round(aug_total_iters*0.3), aug_total_iters)
 
     cudnn.benchmark = True
-    scaler = GradScaler()
+    cls_scaler = GradScaler()
+    aug_scaler = GradScaler()
     softmax = nn.Softmax(dim=1)
     cls_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps).to(device)
     recon_loss = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=aug_model.pad_idx).to(device)
@@ -222,10 +223,10 @@ def training(args):
                                     src_token_type_ids=src_seg)
                     cls_loss_ = cls_loss(logit, trg_label)/args.num_grad_accumulate
 
-                scaler.scale(cls_loss_).backward()
+                cls_scaler.scale(cls_loss_).backward()
                 
-            scaler.step(cls_optimizer)
-            scaler.update()
+            cls_scaler.step(cls_optimizer)
+            cls_scaler.update()
             cls_scheduler.step()
 
             #===================================#
@@ -282,10 +283,10 @@ def training(args):
                 new_loss.requires_grad_(True)
         
                 total_loss = mmd_loss + ce_loss + new_loss
-                total_loss.backward()
+                cls_scaler.scale(total_loss).backward()
 
-            scaler.step(aug_optimizer)
-            scaler.update()
+            aug_scaler.step(aug_optimizer)
+            aug_scaler.update()
             aug_scheduler.step()
                 
             # Print loss value only training
