@@ -262,7 +262,7 @@ def training(args):
                                                             src_token_type_ids=aug_src_seg)
                     mmd_loss = MaximumMeanDiscrepancy(z.view(args.batch_size, -1), 
                                                       z_var=args.z_variation) * 10
-                    ce_loss = recon_loss(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
+                    ce_loss = recon_loss(decoder_out.view(-1, src_vocab_num), aug_src_sequence.contiguous().view(-1))
 
                 # Augmenting
                 decoder_out_token = decoder_out.argmax(dim=2)
@@ -283,7 +283,7 @@ def training(args):
                 new_loss.requires_grad_(True)
         
                 total_loss = mmd_loss + ce_loss + new_loss
-                cls_scaler.scale(total_loss).backward()
+                aug_scaler.scale(total_loss).backward()
 
             aug_scaler.step(aug_optimizer)
             aug_scaler.update()
@@ -346,13 +346,13 @@ def training(args):
             aug_src_sequence, aug_src_att, aug_src_seg, _ = aug_b_iter
 
             # Reconsturction setting
-            trg_sequence_gold = src_sequence.contiguous().view(-1)
+            trg_sequence_gold = aug_src_sequence.contiguous().view(-1)
             non_pad = trg_sequence_gold != aug_model.pad_idx
         
             with torch.no_grad():
-                encoder_out, decoder_out, z = aug_model(src_input_ids=src_sequence, 
-                                                        src_attention_mask=src_att,
-                                                        src_token_type_ids=src_seg)
+                encoder_out, decoder_out, z = aug_model(src_input_ids=aug_src_sequence, 
+                                                        src_attention_mask=aug_src_att,
+                                                        src_token_type_ids=aug_src_seg)
                 mmd_loss = MaximumMeanDiscrepancy(z.view(args.batch_size, -1), 
                                                   z_var=args.z_variation) * 10
                 ce_loss = F.cross_entropy(decoder_out.view(-1, src_vocab_num), trg_sequence_gold)
@@ -381,9 +381,9 @@ def training(args):
         
             with torch.no_grad():
                 with autocast():
-                    encoder_out, decoder_out, z = aug_model(src_input_ids=src_sequence, 
-                                                            src_attention_mask=src_att,
-                                                            src_token_type_ids=src_seg)
+                    encoder_out, decoder_out, z = aug_model(src_input_ids=aug_src_sequence, 
+                                                            src_attention_mask=aug_src_att,
+                                                            src_token_type_ids=aug_src_seg)
 
             # Augmenting
             decoder_out_token = decoder_out.argmax(dim=2)
@@ -421,7 +421,8 @@ def training(args):
                 'aug_optimizer': aug_optimizer.state_dict(),
                 'cls_scheduler': cls_scheduler.state_dict(),
                 'aug_scheduler': aug_scheduler.state_dict(),
-                'scaler': scaler.state_dict()
+                'cls_scaler': cls_scaler.state_dict(),
+                'aug_scaler': aug_scaler.state_dict()
             }, save_file_name)
             best_val_loss = val_mmd_loss
             best_epoch = epoch
