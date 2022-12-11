@@ -47,7 +47,7 @@ def MaximumMeanDiscrepancy(z_tilde, z_var):
 
 def compute_kernel(x, y):
     x_size = x.size(0)
-    y_size = y_size(0)
+    y_size = y.size(0)
     dim = x.size(1)
     x = x.unsqueeze(1)
     y = y.unsqueeze(0)
