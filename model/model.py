@@ -99,7 +99,7 @@ class TransformerModel(nn.Module):
 
         return encoder_out, decoder_out, z
 
-    # @torch.no_grad()
+    @autocast()
     def classify_(self, src_input_ids, src_attention_mask, src_token_type_ids):
         # Encoding
         encoder_out = self.encoder_model(input_ids=src_input_ids, 

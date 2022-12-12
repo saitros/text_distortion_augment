@@ -304,11 +304,12 @@ def training(args):
                                                     max_length=args.src_max_len, padding='max_length', truncation=True)
             ood_trg_list = torch.full((len(augmented_output), num_labels), 1 / num_labels).to(device)
 
-            with autocast():
-                logit = model.classify_(src_input_ids=decoder_out_token,
-                                        src_attention_mask=aug_src_att,
-                                        src_token_type_ids=aug_src_seg)
-                confidence = softmax(logit)
+            with torch.no_grad():
+                with autocast():
+                    logit = model.classify_(src_input_ids=decoder_out_token,
+                                            src_attention_mask=aug_src_att,
+                                            src_token_type_ids=aug_src_seg)
+                    confidence = softmax(logit)
 
             val_new_loss += F.cross_entropy(confidence, ood_trg_list)
 
@@ -329,11 +330,12 @@ def training(args):
             b_iter = input_to_device(batch_iter, device=device)
             src_sequence, src_att, src_seg, trg_label = b_iter
 
-            with autocast():
-                logit = model.classify_(src_input_ids=src_sequence,
-                                        src_attention_mask=src_att,
-                                        src_token_type_ids=src_seg)
-                cls_loss = cls_metric(logit, trg_label)
+            with torch.no_grad():
+                with autocast():
+                    logit = model.classify_(src_input_ids=src_sequence,
+                                            src_attention_mask=src_att,
+                                            src_token_type_ids=src_seg)
+                    cls_loss = cls_metric(logit, trg_label)
             
             val_cls_loss += cls_loss
             val_acc += (logit.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
