@@ -4,7 +4,7 @@ import argparse
 # Import custom modules
 from task.preprocessing import preprocessing
 from task.training import training
-from task.augmenting import augmenting
+# from task.augmenting import augmenting/
 # from task.testing import testing
 # Utils
 from utils import str2bool, path_check, set_random_seed
@@ -23,8 +23,8 @@ def main(args):
     if args.training:
         training(args)
 
-    if args.augmenting:
-        augmenting(args)
+    # if args.augmenting:
+    #     augmenting(args)
 
     # if args.testing:
     #     testing(args)
@@ -84,9 +84,7 @@ if __name__=='__main__':
                         help='')
     parser.add_argument('--batch_size', default=16, type=int,    
                         help='Batch size; Default is 16')
-    parser.add_argument('--cls_lr', default=5e-3, type=float,
-                        help='Maximum learning rate of warmup scheduler; Default is 5e-4')
-    parser.add_argument('--aug_lr', default=5e-3, type=float,
+    parser.add_argument('--lr', default=5e-4, type=float,
                         help='Maximum learning rate of warmup scheduler; Default is 5e-4')
     parser.add_argument('--w_decay', default=1e-5, type=float,
                         help="Ralamb's weight decay; Default is 1e-5")

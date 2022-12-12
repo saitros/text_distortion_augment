@@ -5,12 +5,7 @@ from .scheduler import WarmupLinearSchedule
 
 from transformers import AdamW
 
-def optimizer_select(optimizer_model, model, phase, args):
-    
-    if phase == 'cls':
-        lr = args.cls_lr
-    if phase == 'aug':
-        lr = args.aug_lr
+def optimizer_select(optimizer_model, model, args):
 
     no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
@@ -24,23 +19,20 @@ def optimizer_select(optimizer_model, model, phase, args):
         },
     ]
     if optimizer_model == 'SGD':
-        optimizer = optim.SGD(optimizer_grouped_parameters, lr, momentum=0.9)
+        optimizer = optim.SGD(optimizer_grouped_parameters, args.lr, momentum=0.9)
     elif optimizer_model == 'Adam':
-        optimizer = optim.Adam(optimizer_grouped_parameters, lr=lr, eps=1e-8)
+        optimizer = optim.Adam(optimizer_grouped_parameters, lr=args.lr, eps=1e-8)
     elif optimizer_model == 'AdamW':
-        optimizer = optimizer = AdamW(optimizer_grouped_parameters, lr=lr, eps=1e-8)
+        optimizer = optimizer = AdamW(optimizer_grouped_parameters, lr=args.lr, eps=1e-8)
     elif optimizer_model == 'Ralamb':
-        optimizer = Ralamb(optimizer_grouped_parameters, lr=lr)
+        optimizer = Ralamb(optimizer_grouped_parameters, lr=args.lr)
     else:
         raise Exception("Choose optimizer in ['AdamW', 'Adam', 'SGD', 'Ralamb']")
     return optimizer
 
-def shceduler_select(optimizer, dataloader_dict, phase, args):
-    # Phase setting
-    if phase == 'cls':
-        len_ = len(dataloader_dict['train'])
-    if phase == 'aug':
-        len_ = len(dataloader_dict['aug_train'])
+def shceduler_select(optimizer, dataloader_dict, args):
+
+    len_ = len(dataloader_dict['train']) / args.num_grad_accumulate
 
     # Scheduler setting
     if args.scheduler == 'constant':

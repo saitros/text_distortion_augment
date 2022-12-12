@@ -5,12 +5,15 @@ from torch.autograd import Variable
 from torch.cuda.amp import autocast
 from torch.nn import functional as F
 # Import Huggingface
-from transformers import BertConfig, BertModel, BertForSequenceClassification
-from transformers import DebertaConfig, DebertaForSequenceClassification
+from transformers import PretrainedConfig, AutoModel, AutoTokenizer
 from transformers import AlbertConfig, AlbertForSequenceClassification
+from transformers import DebertaConfig, DebertaForSequenceClassification
+from transformers import BertConfig, BertModel, BertForSequenceClassification
+# Import Custom Modules
+from model.utils import return_model_name
 
-class AugModel(nn.Module):
-    def __init__(self, encoder_model_type: str = 'bert', decoder_model_type: str = 'bert',
+class TransformerModel(nn.Module):
+    def __init__(self, model_type: str = 'bert', num_labels: int = 2,
                  isPreTrain: bool = True, z_variation: float = 2, 
                  dropout: float = 0.3):
         super().__init__()
@@ -31,44 +34,33 @@ class AugModel(nn.Module):
         self.isPreTrain = isPreTrain
         self.z_variation = z_variation
         self.dropout = nn.Dropout(dropout)
-        self.encoder_model_type = encoder_model_type
-        self.decoder_model_type = decoder_model_type
+        self.model_type = model_type
 
         # Token index & dimension
-        self.model_config = BertConfig.from_pretrained('bert-base-cased')
+        model_name = return_model_name(self.model_type)
+        self.model_config = PretrainedConfig.from_pretrained(model_name)
         self.pad_idx = self.model_config.pad_token_id
         self.bos_idx = self.model_config.bos_token_id
         self.eos_idx = self.model_config.eos_token_id
+        self.num_labels = num_labels
 
         self.d_hidden = self.model_config.hidden_size
         self.d_embedding = int(self.model_config.hidden_size / 2)
         self.vocab_num = self.model_config.vocab_size
 
-        # Encoder Model Setting
-        if self.encoder_model_type == 'bert':
-            if self.isPreTrain:
-                self.encoder_model = BertModel.from_pretrained('bert-base-cased')
-            else:
-                self.encoder_model = BertModel(config=self.model_config)
-        else:
-            raise Exception('''It's not ready...''')
+        # Encoder Setting
+        self.encoder_model = AutoModel.from_pretrained(model_name)
 
-        # Linear reduction
+        # Linear Reduction
         self.linear_encoding = nn.Linear(self.d_hidden, self.d_embedding)
-        self.linear_decoding = nn.Linear(self.d_embedding, self.d_hidden)
 
         # Decoder Model Setting
-        if self.decoder_model_type == 'bert':
-            if self.isPreTrain:
-                self.decoder_model = BertModel.from_pretrained('bert-base-cased')
-            else:
-                self.decoder_model = BertModel(config=self.model_config)
+        self.decoder_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
+        self.decoder_classifier = nn.Linear(self.d_embedding, self.num_labels)
+        self.decoder_augmenter = nn.Linear(self.d_embedding, self.vocab_num)
 
-            self.decoder_linear1 = nn.Linear(self.d_hidden, self.d_embedding)
-            self.decoder_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
-            self.decoder_linear2 = nn.Linear(self.d_embedding, self.vocab_num)
-        else:
-            raise Exception('''It's not ready...''')
+        # Tokenizer Setting
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     @autocast()
     def forward(self, src_input_ids, src_attention_mask, src_token_type_ids):
@@ -79,71 +71,63 @@ class AugModel(nn.Module):
                                          token_type_ids=src_token_type_ids)
         encoder_out = encoder_out['last_hidden_state']
 
-        # Linear encoding
+        # Linear encoding (Motivated by WAE)
         z = self.linear_encoding(encoder_out)
-        decoder_in = self.linear_decoding(z)
+
+        # Classifier
+        decoder_out = self.dropout(F.gelu(z))
+        decoder_out = self.decoder_classifier(self.decoder_norm(decoder_out))
+        decoder_cls_token = decoder_out[:,0] # [CLS] token only
+
+        return decoder_out, decoder_cls_token
+
+    @autocast()
+    def augment(self, src_input_ids, src_attention_mask, src_token_type_ids):
+
+        # Encoding
+        encoder_out = self.encoder_model(input_ids=src_input_ids, 
+                                         attention_mask=src_attention_mask,
+                                         token_type_ids=src_token_type_ids)
+        encoder_out = encoder_out['last_hidden_state']
+
+        # Linear encoding (Motivated by WAE)
+        z = self.linear_encoding(encoder_out)
 
         # Decoding
-        # decoder_out = self.decoder_model(inputs_embeds=decoder_in, 
-        #                                  attention_mask=src_attention_mask,
-        #                                  token_type_ids=src_token_type_ids)
-        # decoder_out = decoder_out['last_hidden_state']
-        
-        decoder_out = self.dropout(F.gelu(self.decoder_linear1(decoder_in)))
-        decoder_out = self.decoder_linear2(self.decoder_norm(decoder_out))
+        decoder_out = self.dropout(F.gelu(z))
+        decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
 
         return encoder_out, decoder_out, z
 
-    # @autocast()
-    # def generate(self, src_input_ids, src_attention_mask, src_token_type_ids):
-    #     # Encoding
-    #     encoder_out = self.encoder_model(input_ids=src_input_ids, 
-    #                                      attention_mask=src_attention_mask,
-    #                                      token_type_ids=src_token_type_ids)
-    #     encoder_out = encoder_out['last_hidden_state']
+    @torch.no_grad()
+    def classify_(self, src_input_ids, src_attention_mask, src_token_type_ids):
+        # Encoding
+        encoder_out = self.encoder_model(input_ids=src_input_ids, 
+                                         attention_mask=src_attention_mask,
+                                         token_type_ids=src_token_type_ids)
+        encoder_out = encoder_out['last_hidden_state']
 
-    #     # WAE Encoding
+        # Linear encoding (Motivated by WAE)
+        z = self.linear_encoding(encoder_out)
 
-    #     z = (self.z_variation*2) * torch.rand_like(encoder_out)
+        # Classifier
+        decoder_out = self.decoder_classifier(self.decoder_norm(F.gelu(z)))
+        decoder_cls_token = decoder_out[:,0] # [CLS] token only
 
-    #     # Decoding
-    #     decoder_out = self.decoder_model(inputs_embeds=encoder_out + z, 
-    #                                      attention_mask=src_attention_mask,
-    #                                      token_type_ids=src_token_type_ids)
-    #     decoder_out = decoder_out['last_hidden_state']
-        
-    #     decoder_out = self.dropout(F.gelu(self.decoder_linear1(decoder_out)))
-    #     decoder_out = self.decoder_linear2(self.decoder_norm(decoder_out))
+        return decoder_cls_token
 
-    #     return decoder_out
+    @torch.no_grad()
+    def generate(self, src_input_ids, src_attention_mask, src_token_type_ids):
+        # Encoding
+        encoder_out = self.encoder_model(input_ids=src_input_ids, 
+                                         attention_mask=src_attention_mask,
+                                         token_type_ids=src_token_type_ids)
+        encoder_out = encoder_out['last_hidden_state']
 
-class ClsModel(nn.Module):
-    def __init__(self, model_type: str = 'bert', num_labels: int = 2):
-        super().__init__()
+        # Linear encoding (Motivated by WAE)
+        z = self.linear_encoding(encoder_out)
 
-        self.model_type = model_type
-        self.num_labels = num_labels
+        # Decoding
+        decoder_out = self.decoder_augmenter(self.decoder_norm(F.gelu(z)))
 
-        # Token index & dimension
-        if self.model_type == 'bert':
-            self.model_config = BertConfig.from_pretrained('bert-base-cased')
-            self.cls_model = BertForSequenceClassification.from_pretrained('bert-base-cased', num_labels=self.num_labels)
-        if self.model_type == 'deberta':
-            self.model_config = DebertaConfig.from_pretrained('hf-internal-testing/tiny-random-deberta')
-            self.cls_model = DebertaForSequenceClassification.from_pretrained("hf-internal-testing/tiny-random-deberta", num_labels=self.num_labels)
-        if self.model_type == 'albert':
-            self.model_config = AlbertConfig.from_pretrained('textattack/albert-base-v2-imdb')
-            self.cls_model = AlbertForSequenceClassification.from_pretrained("textattack/albert-base-v2-imdb", num_labels=self.num_labels)
-
-    @autocast()
-    def forward(self, src_input_ids, src_attention_mask, src_token_type_ids):
-        if self.model_type == 'bert':
-            model_out = self.cls_model(input_ids=src_input_ids, 
-                                       attention_mask=src_attention_mask,
-                                       token_type_ids=src_token_type_ids)
-        else:
-            model_out = self.cls_model(input_ids=src_input_ids, 
-                                       attention_mask=src_attention_mask)
-        model_out = model_out['logits']
-
-        return model_out
+        return decoder_out, z
