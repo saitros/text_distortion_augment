@@ -44,3 +44,25 @@ def MaximumMeanDiscrepancy(z_tilde, z_var):
           -im_kernel_sum(z, z_tilde, z_var, exclude_diag=False).div(n*n).mul(2)
 
     return out
+
+def compute_kernel(x, y):
+    x_size = x.size(0)
+    y_size = y.size(0)
+    dim = x.size(1)
+    x = x.unsqueeze(1)
+    y = y.unsqueeze(0)
+    tiled_x = x.expand(x_size, y_size, dim)
+    tiled_y = y.expand(x_size, y_size, dim)
+    kernel_input = (tiled_x - tiled_y).pow(2).mean(2)/float(dim)
+    return torch.exp(-kernel_input)
+
+def compute_mmd(z_tilde, z_var):
+    
+    z = Variable(z_tilde.data.new(z_tilde.size()).normal_(std=z_var))
+    
+    x_kernel = compute_kernel(z_tilde, z_tilde)
+    y_kernel = compute_kernel(z, z)
+    xy_kernel = compute_kernel(z_tilde, z)
+    mmd = x_kernel.mean() + y_kernel.mean() - 2*xy_kernel.mean()
+    
+    return mmd 
