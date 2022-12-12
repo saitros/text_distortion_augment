@@ -220,17 +220,29 @@ def training(args):
                     recon_loss = recon_metric(decoder_out.view(-1, src_vocab_num), aug_src_sequence.contiguous().view(-1))
 
                 # Augmenting
+                # decoder_out_token = decoder_out.argmax(dim=2)
+                # augmented_output = model.tokenizer.batch_decode(decoder_out_token, skip_special_tokens=True)
+                # augmented_tokenized = model.tokenizer(augmented_output, return_tensors='pt', 
+                #                                       max_length=args.src_max_len, padding='max_length', truncation=True)
+                # ood_trg_list = torch.full((len(augmented_output), num_labels), 1 / num_labels).to(device)
+
+                # with autocast():
+                #     logit = model.classify_(src_input_ids=augmented_tokenized['input_ids'].to(device),
+                #                             src_attention_mask=augmented_tokenized['attention_mask'].to(device),
+                #                             src_token_type_ids=augmented_tokenized['token_type_ids'].to(device))
+                #     confidence = softmax(logit)
                 decoder_out_token = decoder_out.argmax(dim=2)
-                augmented_output = model.tokenizer.batch_decode(decoder_out_token, skip_special_tokens=True)
-                augmented_tokenized = model.tokenizer(augmented_output, return_tensors='pt', 
-                                                      max_length=args.src_max_len, padding='max_length', truncation=True)
-                ood_trg_list = torch.full((len(augmented_output), num_labels), 1 / num_labels).to(device)
+                ood_trg_list = torch.full((len(decoder_out_token), num_labels), 1 / num_labels).to(device)
+
+                model.eval()
 
                 with autocast():
-                    logit = model.classify_(src_input_ids=augmented_tokenized['input_ids'].to(device),
-                                            src_attention_mask=augmented_tokenized['attention_mask'].to(device),
-                                            src_token_type_ids=augmented_tokenized['token_type_ids'].to(device))
+                    logit = model.classify_(src_input_ids=decoder_out_token,
+                                            src_attention_mask=aug_src_att,
+                                            src_token_type_ids=aug_src_seg)
                     confidence = softmax(logit)
+
+                model.train()
 
                 new_loss = F.cross_entropy(confidence, ood_trg_list)
         
@@ -273,7 +285,7 @@ def training(args):
 
             # Reconsturction setting
             trg_sequence_gold = aug_src_sequence.contiguous().view(-1)
-            non_pad = trg_sequence_gold != aug_model.pad_idx
+            non_pad = trg_sequence_gold != model.pad_idx
         
             with autocast():
                 decoder_out, z = model.generate(src_input_ids=aug_src_sequence, 
@@ -293,18 +305,18 @@ def training(args):
             ood_trg_list = torch.full((len(augmented_output), num_labels), 1 / num_labels).to(device)
 
             with autocast():
-                logit = model.classify_(src_input_ids=augmented_tokenized['input_ids'].to(device),
-                                        src_attention_mask=augmented_tokenized['attention_mask'].to(device),
-                                        src_token_type_ids=augmented_tokenized['token_type_ids'].to(device))
+                logit = model.classify_(src_input_ids=decoder_out_token,
+                                        src_attention_mask=aug_src_att,
+                                        src_token_type_ids=aug_src_seg)
                 confidence = softmax(logit)
 
             val_new_loss += F.cross_entropy(confidence, ood_trg_list)
 
-        val_ce_loss /= len(dataloader_dict['valid'])
+        val_recon_loss /= len(dataloader_dict['valid'])
         val_mmd_loss /= len(dataloader_dict['valid'])
         val_new_loss /= len(dataloader_dict['valid'])
         val_acc /= len(dataloader_dict['valid'])
-        write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_ce_loss)
+        write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
         write_log(logger, 'Augmenter Validation MMD Loss: %3.3f' % val_mmd_loss)
         write_log(logger, 'Augmenter Validation Reconstruction Accuracy: %3.2f%%' % (val_acc * 100))
 
