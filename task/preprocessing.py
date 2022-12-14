@@ -72,7 +72,7 @@ def preprocessing(args):
     start_time = time.time()
 
     # Path checking
-    save_path = os.path.join(args.preprocess_path, args.data_name)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
 
     with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'w') as f:
         f.create_dataset('train_src_input_ids', data=processed_sequences['train']['input_ids'])

@@ -48,15 +48,16 @@ class TransformerModel(nn.Module):
         self.d_embedding = int(self.model_config.hidden_size / 2)
         self.vocab_num = self.model_config.vocab_size
 
-        # Encoder Setting
+        # Pre-trained Model Setting
         self.encoder_model = AutoModel.from_pretrained(model_name)
 
-        # Linear Reduction
+        # Dimension Reduction
         self.linear_encoding = nn.Linear(self.d_hidden, self.d_embedding)
+        self.linear_decoding = nn.Linear(self.d_embedding, self.d_hidden)
 
-        # Decoder Model Setting
+        # Linear Model Setting
+        self.decoder_linear = nn.Linear(self.d_hidden, self.d_embedding)
         self.decoder_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
-        self.decoder_classifier = nn.Linear(self.d_embedding, self.num_labels)
         self.decoder_augmenter = nn.Linear(self.d_embedding, self.vocab_num)
 
         # Tokenizer Setting
@@ -73,61 +74,10 @@ class TransformerModel(nn.Module):
 
         # Linear encoding (Motivated by WAE)
         z = self.linear_encoding(encoder_out)
-
-        # Classifier
-        decoder_out = self.dropout(F.gelu(z))
-        decoder_out = self.decoder_classifier(self.decoder_norm(decoder_out))
-        decoder_cls_token = decoder_out[:,0] # [CLS] token only
-
-        return decoder_out, decoder_cls_token
-
-    @autocast()
-    def augment(self, src_input_ids, src_attention_mask, src_token_type_ids):
-
-        # Encoding
-        encoder_out = self.encoder_model(input_ids=src_input_ids, 
-                                         attention_mask=src_attention_mask,
-                                         token_type_ids=src_token_type_ids)
-        encoder_out = encoder_out['last_hidden_state']
-
-        # Linear encoding (Motivated by WAE)
-        z = self.linear_encoding(encoder_out)
+        decoder_in = self.linear_decoding(z)
 
         # Decoding
-        decoder_out = self.dropout(F.gelu(z))
+        decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_in)))
         decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
-
-        return encoder_out, decoder_out, z
-
-    @autocast()
-    def classify_(self, src_input_ids, src_attention_mask, src_token_type_ids):
-        # Encoding
-        encoder_out = self.encoder_model(input_ids=src_input_ids, 
-                                         attention_mask=src_attention_mask,
-                                         token_type_ids=src_token_type_ids)
-        encoder_out = encoder_out['last_hidden_state']
-
-        # Linear encoding (Motivated by WAE)
-        z = self.linear_encoding(encoder_out)
-
-        # Classifier
-        decoder_out = self.decoder_classifier(self.decoder_norm(F.gelu(z)))
-        decoder_cls_token = decoder_out[:,0] # [CLS] token only
-
-        return decoder_cls_token
-
-    @torch.no_grad()
-    def generate(self, src_input_ids, src_attention_mask, src_token_type_ids):
-        # Encoding
-        encoder_out = self.encoder_model(input_ids=src_input_ids, 
-                                         attention_mask=src_attention_mask,
-                                         token_type_ids=src_token_type_ids)
-        encoder_out = encoder_out['last_hidden_state']
-
-        # Linear encoding (Motivated by WAE)
-        z = self.linear_encoding(encoder_out)
-
-        # Decoding
-        decoder_out = self.decoder_augmenter(self.decoder_norm(F.gelu(z)))
 
         return decoder_out, z

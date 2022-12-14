@@ -56,17 +56,23 @@ if __name__=='__main__':
     # Model setting
     parser.add_argument('--isPreTrain', default=True, type=str2bool,
                         help='Use pre-trained language model; Default is True')
-    parser.add_argument('--aug_model', default='bert', type=str,
+    parser.add_argument('--model_type', default='bert', type=str,
                         help='Augmentation model type; Default is BERT')
-    parser.add_argument('--cls_model', default='bert', type=str,
-                        help='Classification model type; Default is BERT')
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']
-    parser.add_argument('--optimizer', default='Ralamb', type=str, choices=optim_list,
+    parser.add_argument('--cls_optimizer', default='Ralamb', type=str, choices=optim_list,
                         help="Choose optimizer setting in 'AdamW', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
-    parser.add_argument('--scheduler', default='warmup', type=str, choices=scheduler_list,
+    parser.add_argument('--cls_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
+    parser.add_argument('--aug_optimizer', default='Ralamb', type=str, choices=optim_list,
+                        help="Choose optimizer setting in 'AdamW', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
+    parser.add_argument('--aug_scheduler', default='warmup', type=str, choices=scheduler_list,
+                        help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
+    parser.add_argument('--cls_lr', default=5e-4, type=float,
+                        help='Maximum learning rate of warmup scheduler; Default is 5e-4')
+    parser.add_argument('--aug_lr', default=5e-4, type=float,
+                        help='Maximum learning rate of warmup scheduler; Default is 5e-4')
     parser.add_argument('--n_warmup_epochs', default=2, type=float, 
                         help='Wamrup epochs when using warmup scheduler; Default is 2')
     parser.add_argument('--lr_lambda', default=0.95, type=float,

@@ -1,6 +1,9 @@
 import math
 import torch
+import torch.nn as nn
+from torch.cuda.amp import autocast
 from torch.autograd import Variable
+from torch.nn import functional as F
 
 def im_kernel_sum(z1, z2, z_var, exclude_diag=True):
     r"""Calculate sum of sample-wise measures of inverse multiquadratics kernel described in the WAE paper.
@@ -66,3 +69,24 @@ def compute_mmd(z_tilde, z_var):
     mmd = x_kernel.mean() + y_kernel.mean() - 2*xy_kernel.mean()
     
     return mmd 
+
+class CustomLoss(nn.Module):
+    def __init__(self, model, device, num_labels):
+        super(CustomLoss, self).__init__()
+        self.model = model
+        self.device = device
+        self.num_labels = num_labels
+
+    def forward(self, src_sequence, src_att, src_seg):
+
+        ood_trg_list = torch.full((len(src_sequence), self.num_labels), 1 / self.num_labels).to(self.device)
+
+        with torch.no_grad():
+            with autocast():
+                logit = self.model(input_ids=src_sequence,
+                                   attention_mask=src_att,
+                                   token_type_ids=src_seg)
+
+        new_loss = F.cross_entropy(logit, ood_trg_list) * 10
+
+        return new_loss
