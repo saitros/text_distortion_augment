@@ -22,14 +22,14 @@ from transformers import AutoTokenizer
 # Import custom modules
 from model.model import TransformerModel
 from model.dataset import CustomDataset
-from model.loss import compute_mmd
+from model.loss import compute_mmd, compute_mmd_2
 from optimizer.utils import shceduler_select, optimizer_select
 from optimizer.scheduler import get_cosine_schedule_with_warmup
 from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
 from task.utils import input_to_device
 
-def training(args):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+def training_mmd(args):
+    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 
     #===================================#
     #==============Logging==============#
@@ -182,7 +182,7 @@ def training(args):
 
                 # Classifier training
                 with autocast():
-                    _, decoder_out, logit = model(src_input_ids=src_sequence,
+                    origin_cls, logit = model.origin_classify_(src_input_ids=src_sequence,
                                                src_attention_mask=src_att,
                                                src_token_type_ids=src_seg)
                     cls_loss = cls_metric(logit, trg_label)/args.num_grad_accumulate
@@ -215,35 +215,20 @@ def training(args):
                     _, decoder_out, z = model.augment(src_input_ids=aug_src_sequence, 
                                                                 src_attention_mask=aug_src_att,
                                                                 src_token_type_ids=aug_src_seg)
-                    mmd_loss = compute_mmd(z.view(args.batch_size, -1), 
-                                           z_var=args.z_variation) * 100
-                    recon_loss = recon_metric(decoder_out.view(-1, src_vocab_num), aug_src_sequence.contiguous().view(-1))
-                    # recon_loss = recon_metric()
-
-                # Augmenting
-                # decoder_out_token = decoder_out.argmax(dim=2)
-                # augmented_output = model.tokenizer.batch_decode(decoder_out_token, skip_special_tokens=True)
-                # augmented_tokenized = model.tokenizer(augmented_output, return_tensors='pt', 
-                #                                       max_length=args.src_max_len, padding='max_length', truncation=True)
-                # ood_trg_list = torch.full((len(augmented_output), num_labels), 1 / num_labels).to(device)
-
-                # with autocast():
-                #     logit = model.classify_(src_input_ids=augmented_tokenized['input_ids'].to(device),
-                #                             src_attention_mask=augmented_tokenized['attention_mask'].to(device),
-                #                             src_token_type_ids=augmented_tokenized['token_type_ids'].to(device))
-                #     confidence = softmax(logit)
-                decoder_out_token = decoder_out.argmax(dim=2)
-                ood_trg_list = torch.full((len(decoder_out_token), num_labels), 1 / num_labels).to(device)
-
-                model.eval()
-
-                with autocast():
-                    logit = model.classify_(src_input_ids=decoder_out_token,
+                    
+                    decoder_out_token = decoder_out.argmax(dim=2)
+                    ood_trg_list = torch.full((len(decoder_out_token), num_labels), 1 / num_labels).to(device)
+                    
+                    aug_cls, logit = model.aug_classify_(src_input_ids=decoder_out_token,
                                             src_attention_mask=aug_src_att,
                                             src_token_type_ids=aug_src_seg)
+                    
+                    mmd_loss = compute_mmd_2(origin_cls, aug_cls)
+                    
+                    recon_loss = recon_metric(decoder_out.view(-1, src_vocab_num), aug_src_sequence.contiguous().view(-1))
+                    # recon_loss = recon_metric()
+                                    
                     confidence = softmax(logit)
-
-                model.train()
 
                 new_loss = F.cross_entropy(confidence, ood_trg_list)
         

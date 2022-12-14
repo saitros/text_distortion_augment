@@ -61,6 +61,10 @@ class TransformerModel(nn.Module):
 
         # Tokenizer Setting
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # lee setting
+        self.origin_classifier = nn.Linear(self.d_hidden, self.num_labels)
+        self.aug_classifier = nn.Linear(self.d_hidden, self.num_labels)
 
     @autocast()
     def forward(self, src_input_ids, src_attention_mask, src_token_type_ids):
@@ -69,17 +73,18 @@ class TransformerModel(nn.Module):
         encoder_out = self.encoder_model(input_ids=src_input_ids, 
                                          attention_mask=src_attention_mask,
                                          token_type_ids=src_token_type_ids)
-        encoder_out = encoder_out['last_hidden_state']
+        encoder_out = encoder_out['last_hidden_state'] # (batch_size, token, d_model)
 
         # Linear encoding (Motivated by WAE)
-        z = self.linear_encoding(encoder_out)
+        # encoder_out = encoder_out[:,0]
+        z = self.linear_encoding(encoder_out) # (batch_size, token, d_embedding)
 
         # Classifier
         decoder_out = self.dropout(F.gelu(z))
-        decoder_out = self.decoder_classifier(self.decoder_norm(decoder_out))
-        decoder_cls_token = decoder_out[:,0] # [CLS] token only
+        decoder_out = self.decoder_classifier(self.decoder_norm(decoder_out)) #(batch, token, #of label)
+        decoder_cls_token = decoder_out[:,0] # [CLS] token only (batch, 0)
 
-        return decoder_out, decoder_cls_token
+        return encoder_out, decoder_out, decoder_cls_token
 
     @autocast()
     def augment(self, src_input_ids, src_attention_mask, src_token_type_ids):
@@ -131,3 +136,25 @@ class TransformerModel(nn.Module):
         decoder_out = self.decoder_augmenter(self.decoder_norm(F.gelu(z)))
 
         return decoder_out, z
+    
+    @autocast()
+    def origin_classify_(self, src_input_ids, src_attention_mask, src_token_type_ids):
+        # Encoding
+        encoder_out = self.encoder_model(input_ids=src_input_ids, 
+                                         attention_mask=src_attention_mask,
+                                         token_type_ids=src_token_type_ids)
+        encoder_out = encoder_out['last_hidden_state']
+
+        logit = self.origin_classifier(encoder_out[:, 0, :])
+        return encoder_out[:, 0, :], logit
+    
+    @autocast()
+    def aug_classify_(self, src_input_ids, src_attention_mask, src_token_type_ids):
+        # Encoding
+        encoder_out = self.encoder_model(input_ids=src_input_ids, 
+                                         attention_mask=src_attention_mask,
+                                         token_type_ids=src_token_type_ids)
+        encoder_out = encoder_out['last_hidden_state']
+
+        logit = self.origin_classifier(encoder_out[:, 0, :])
+        return encoder_out[:, 0, :], logit

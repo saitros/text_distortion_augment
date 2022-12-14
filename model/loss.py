@@ -66,3 +66,12 @@ def compute_mmd(z_tilde, z_var):
     mmd = x_kernel.mean() + y_kernel.mean() - 2*xy_kernel.mean()
     
     return mmd 
+
+def compute_mmd_2(x, y):
+
+    x_kernel = compute_kernel(x, x)
+    y_kernel = compute_kernel(y, y)
+    xy_kernel = compute_kernel(x, y)
+    mmd = x_kernel.mean() + y_kernel.mean() - 2*xy_kernel.mean()
+    
+    return mmd 

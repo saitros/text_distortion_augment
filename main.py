@@ -4,6 +4,7 @@ import argparse
 # Import custom modules
 from task.preprocessing import preprocessing
 from task.training import training
+from task.training_mmd import training_mmd
 # from task.augmenting import augmenting/
 # from task.testing import testing
 # Utils
@@ -21,7 +22,8 @@ def main(args):
         preprocessing(args)
 
     if args.training:
-        training(args)
+        # training(args)
+        training_mmd(args)
 
     # if args.augmenting:
     #     augmenting(args)
