@@ -70,6 +70,15 @@ def compute_mmd(z_tilde, z_var):
     
     return mmd 
 
+def compute_mmd2(z, z_tilde, z_var):
+    
+    x_kernel = compute_kernel(z_tilde, z_tilde)
+    y_kernel = compute_kernel(z, z)
+    xy_kernel = compute_kernel(z_tilde, z)
+    mmd = x_kernel.mean() + y_kernel.mean() - 2*xy_kernel.mean()
+    
+    return mmd 
+
 class CustomLoss(nn.Module):
     def __init__(self, model, device, num_labels):
         super(CustomLoss, self).__init__()
@@ -85,7 +94,7 @@ class CustomLoss(nn.Module):
             with autocast():
                 logit = self.model(input_ids=src_sequence,
                                    attention_mask=src_att,
-                                   token_type_ids=src_seg)
+                                   token_type_ids=src_seg)['logits']
 
         new_loss = F.cross_entropy(logit, ood_trg_list) * 10
 

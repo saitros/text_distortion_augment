@@ -5,4 +5,6 @@ def return_model_name(model_type):
         out = 'textattack/albert-base-v2-imdb'
     if model_type == 'deberta':
         out = 'microsoft/deberta-v3-base'
+    if model_type == 'bart':
+        out = 'facebook/bart-base'
     return out

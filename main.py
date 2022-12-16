@@ -4,6 +4,7 @@ import argparse
 # Import custom modules
 from task.preprocessing import preprocessing
 from task.training import training
+from task.training2 import training2
 # from task.augmenting import augmenting/
 # from task.testing import testing
 # Utils
@@ -22,6 +23,9 @@ def main(args):
 
     if args.training:
         training(args)
+    
+    if args.training2:
+        training2(args)
 
     # if args.augmenting:
     #     augmenting(args)
@@ -37,6 +41,7 @@ if __name__=='__main__':
     # Task setting
     parser.add_argument('--preprocessing', action='store_true')
     parser.add_argument('--training', action='store_true')
+    parser.add_argument('--training2', action='store_true')
     parser.add_argument('--augmenting', action='store_true')
     parser.add_argument('--resume', action='store_true')
     # Path setting

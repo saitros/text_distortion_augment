@@ -43,7 +43,7 @@ def preprocessing(args):
     write_log(logger, 'Tokenizer setting...')
     start_time = time.time()
 
-    tokenizer = AutoTokenizer.from_pretrained('bert-base-cased')
+    tokenizer = AutoTokenizer.from_pretrained('facebook/bart-base')
 
     processed_sequences = dict()
     processed_sequences['train'] = dict()
@@ -60,7 +60,8 @@ def preprocessing(args):
         )
         processed_sequences[phase]['input_ids'] = encoded_dict['input_ids']
         processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
-        processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
+        if args.model_type == 'bert':
+            processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
 
     write_log(logger, f'Done! ; {round((time.time()-start_time)/60, 3)}min spend')
 
@@ -77,18 +78,20 @@ def preprocessing(args):
     with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'w') as f:
         f.create_dataset('train_src_input_ids', data=processed_sequences['train']['input_ids'])
         f.create_dataset('train_src_attention_mask', data=processed_sequences['train']['attention_mask'])
-        f.create_dataset('train_src_token_type_ids', data=processed_sequences['train']['token_type_ids'])
         f.create_dataset('valid_src_input_ids', data=processed_sequences['valid']['input_ids'])
         f.create_dataset('valid_src_attention_mask', data=processed_sequences['valid']['attention_mask'])
-        f.create_dataset('valid_src_token_type_ids', data=processed_sequences['valid']['token_type_ids'])
         f.create_dataset('train_label', data=np.array(trg_list['train']).astype(int))
         f.create_dataset('valid_label', data=np.array(trg_list['valid']).astype(int))
+        if args.model_type == 'bert':
+            f.create_dataset('train_src_token_type_ids', data=processed_sequences['train']['token_type_ids'])
+            f.create_dataset('valid_src_token_type_ids', data=processed_sequences['valid']['token_type_ids'])
 
     with h5py.File(os.path.join(save_path, 'test_processed.hdf5'), 'w') as f:
         f.create_dataset('test_src_input_ids', data=processed_sequences['test']['input_ids'])
         f.create_dataset('test_src_attention_mask', data=processed_sequences['test']['attention_mask'])
-        f.create_dataset('test_src_token_type_ids', data=processed_sequences['test']['token_type_ids'])
         f.create_dataset('test_label', data=np.array(trg_list['test']).astype(int))
+        if args.model_type == 'bert':
+            f.create_dataset('test_src_token_type_ids', data=processed_sequences['test']['token_type_ids'])
 
     # Word2id pickle file save
     word2id_dict = {

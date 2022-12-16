@@ -6,7 +6,7 @@ class CustomDataset(Dataset):
                  trg_list: list = None, min_len: int = 4, src_max_len: int = 300):
         # List setting
         if src_seg_list == list():
-            src_seg_list = ['_' for _ in range(len(src_list))]
+            src_seg_list = [[0] for _ in range(len(src_list))]
         self.tensor_list = []
 
         # Tensor list
