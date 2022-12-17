@@ -54,7 +54,8 @@ class TransformerModel(nn.Module):
 
         # Encoding
         self.position = PositionalEmbedding(d_model=self.d_hidden, max_len=360)
-        self.gru = nn.GRU(input_size=self.d_hidden, hidden_size=self.d_hidden, num_layers=3)
+        self.attention = AttentionScore(self.d_hidden, self.d_hidden)
+        self.gru = nn.GRU(input_size=self.d_hidden, hidden_size=self.d_hidden, num_layers=1)
 
         # Linear Model Setting
         self.decoder_linear = nn.Linear(self.d_hidden, self.d_embedding)
@@ -84,6 +85,8 @@ class TransformerModel(nn.Module):
         encoder_out = self.encoder(input_ids=src_input_ids, 
                                    attention_mask=src_attention_mask)
         encoder_out = encoder_out['last_hidden_state']
+        # score = self.attention(encoder_out, encoder_out, src_attention_mask)
+        # attent_memory = score.bmm(encoder_out)
         encoder_out, _ = self.gru(encoder_out + self.position(src_input_ids))
         encoder_out = encoder_out.sum(dim=1)
 
@@ -139,10 +142,11 @@ class ClassifierModel(nn.Module):
         self.linear2 = nn.Linear(256, 128)
         self.linear3 = nn.Linear(128, num_labels)
         self.dropout = nn.Dropout(dropout)
+        self.leaky_relu = nn.LeakyReLU(0.1)
 
     def forward(self, encoder_out):
-        out = self.dropout(F.gelu(self.linear1(encoder_out)))
-        out = self.dropout(F.gelu(self.linear2(out)))
+        out = self.dropout(self.leaky_relu(self.linear1(encoder_out)))
+        out = self.dropout(self.leaky_relu(self.linear2(out)))
         out = self.linear3(out)
 
         return out
@@ -216,3 +220,72 @@ class PositionalEmbedding(nn.Module):
 
     def forward(self, x):
         return self.pe[:, :x.size(1)]
+
+class AttentionScore(nn.Module):
+    """
+    correlation_func = 1, sij = x1^Tx2
+    correlation_func = 2, sij = (Wx1)D(Wx2)
+    correlation_func = 3, sij = Relu(Wx1)DRelu(Wx2)
+    correlation_func = 4, sij = x1^TWx2
+    correlation_func = 5, sij = Relu(Wx1)DRelu(Wx2)
+    """
+
+    def __init__(self, input_size, hidden_size, correlation_func=1, do_similarity=False):
+        super(AttentionScore, self).__init__()
+        self.correlation_func = correlation_func
+        self.hidden_size = hidden_size
+
+        if correlation_func == 2 or correlation_func == 3:
+            self.linear = nn.Linear(input_size, hidden_size, bias=False)
+            if do_similarity:
+                self.diagonal = Parameter(torch.ones(1, 1, 1) / (hidden_size ** 0.5), requires_grad=False)
+            else:
+                self.diagonal = Parameter(torch.ones(1, 1, hidden_size), requires_grad=True)
+
+        if correlation_func == 4:
+            self.linear = nn.Linear(input_size, input_size, bias=False)
+
+        if correlation_func == 5:
+            self.linear = nn.Linear(input_size, hidden_size, bias=False)
+
+    def forward(self, x1, x2, x2_mask):
+        '''
+        Input:
+        x1: batch x word_num1 x dim
+        x2: batch x word_num2 x dim
+        Output:
+        scores: batch x word_num1 x word_num2
+        '''
+        # x1 = dropout(x1, p = dropout_p, training = self.training)
+        # x2 = dropout(x2, p = dropout_p, training = self.training)
+
+        x1_rep = x1
+        x2_rep = x2
+        batch = x1_rep.size(0)
+        word_num1 = x1_rep.size(1)
+        word_num2 = x2_rep.size(1)
+        dim = x1_rep.size(2)
+        if self.correlation_func == 2 or self.correlation_func == 3:
+            x1_rep = self.linear(x1_rep.contiguous().view(-1, dim)).view(batch, word_num1, self.hidden_size)  # Wx1
+            x2_rep = self.linear(x2_rep.contiguous().view(-1, dim)).view(batch, word_num2, self.hidden_size)  # Wx2
+            if self.correlation_func == 3:
+                x1_rep = F.relu(x1_rep)
+                x2_rep = F.relu(x2_rep)
+            x1_rep = x1_rep * self.diagonal.expand_as(x1_rep)
+            # x1_rep is (Wx1)D or Relu(Wx1)D
+            # x1_rep: batch x word_num1 x dim (corr=1) or hidden_size (corr=2,3)
+
+        if self.correlation_func == 4:
+            x2_rep = self.linear(x2_rep.contiguous().view(-1, dim)).view(batch, word_num2, dim)  # Wx2
+
+        if self.correlation_func == 5:
+            x1_rep = self.linear(x1_rep.contiguous().view(-1, dim)).view(batch, word_num1, self.hidden_size)  # Wx1
+            x2_rep = self.linear(x2_rep.contiguous().view(-1, dim)).view(batch, word_num2, self.hidden_size)  # Wx2
+            x1_rep = F.relu(x1_rep)
+            x2_rep = F.relu(x2_rep)
+        scores = x1_rep.bmm(x2_rep.transpose(1, 2))
+        empty_mask = x2_mask.eq(0).expand_as(scores)
+        scores.data.masked_fill_(empty_mask.data, -float('inf'))
+        # softmax
+        alpha_flat = F.softmax(scores, dim=-1)
+        return alpha_flat

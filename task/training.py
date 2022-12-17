@@ -185,7 +185,8 @@ def training(args):
             # Augmenter training
             decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
                                                     src_attention_mask=src_att)
-            mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
+            # mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
+            mmd_loss = torch.tensor(0.0)
             recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
             total_loss = mmd_loss + recon_loss
             total_loss.backward()
@@ -239,7 +240,8 @@ def training(args):
                 # Augmenter training
                 decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
                                                         src_attention_mask=src_att)
-                mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
+                # mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
+                mmd_loss = torch.tensor(0.0)
                 recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
                 val_mmd_loss += mmd_loss
