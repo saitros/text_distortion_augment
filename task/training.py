@@ -190,14 +190,15 @@ def training(args):
             with autocast():
                 decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
                                                      src_attention_mask=src_att)
-                mmd_loss = compute_mmd(encoder_out.sum(dim=1), z_var=args.z_variation) * 100
+                mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
                 recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
-
-            # decoder_out_token = decoder_out.argmax(dim=2)
-            # new_loss = CustomCriterion(src_sequence=decoder_out_token, src_att=src_att, src_seg=src_seg)
 
                 total_loss = mmd_loss + recon_loss
                 aug_scaler.scale(total_loss).backward()
+
+            if args.clip_grad_norm > 0:
+                aug_scaler.unscale_(aug_optimizer)
+                clip_grad_norm_(aug_model.parameters(), args.clip_grad_norm)
             aug_scaler.step(aug_optimizer)
             aug_scaler.update()
             aug_scheduler.step()
@@ -208,10 +209,13 @@ def training(args):
 
             # Classifier training
             with autocast():
-                logit = cls_model(z=Variable(encoder_out.sum(dim=1).clone(), volatile=False))
+                logit = cls_model(encoder_out=Variable(encoder_out.clone(), volatile=False))
                 cls_loss = cls_criterion(logit, trg_label)
                 cls_scaler.scale(cls_loss).backward()
 
+            if args.clip_grad_norm > 0:
+                cls_scaler.unscale_(cls_optimizer)
+                clip_grad_norm_(cls_model.parameters(), args.clip_grad_norm)
             cls_scaler.step(cls_optimizer)
             cls_scaler.update()
             cls_scheduler.step()
@@ -249,7 +253,7 @@ def training(args):
                 with autocast():
                     decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
                                                          src_attention_mask=src_att)
-                    mmd_loss = compute_mmd(encoder_out.sum(dim=1), z_var=args.z_variation) * 100
+                    mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
                     recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
                 decoder_out_token = decoder_out.argmax(dim=2)
@@ -259,7 +263,7 @@ def training(args):
 
             with torch.no_grad():
                 with autocast():
-                    logit = cls_model(z=encoder_out.sum(dim=1))
+                    logit = cls_model(encoder_out=encoder_out)
                     cls_loss = cls_criterion(logit, trg_label)
             
             val_cls_loss += cls_loss
@@ -274,79 +278,85 @@ def training(args):
         write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
         
-        #===================================#
-        #=========Text Augmentation=========#
-        #===================================#
-        for i, batch_iter in enumerate(tqdm(dataloader_dict['aug_train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
+        # #===================================#
+        # #=========Text Augmentation=========#
+        # #===================================#
+        # for i, batch_iter in enumerate(tqdm(dataloader_dict['aug_train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
-            b_iter = input_to_device(batch_iter, device=device)
-            src_sequence, src_att, src_seg, trg_label = b_iter
-            # trg_label = trg_label.cpu().numpy()
+        #     b_iter = input_to_device(batch_iter, device=device)
+        #     src_sequence, src_att, src_seg, trg_label = b_iter
+        #     # trg_label = trg_label.cpu().numpy()
 
-            with torch.no_grad():
-                # Augmenter training
-                with autocast():
-                    decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
-                                                         src_attention_mask=src_att)
+        #     # Augmenter training
+        #     with torch.no_grad():
+        #         with autocast():
+        #             encoder_out = aug_model.encoder(input_ids=src_sequence, 
+        #                                             attention_mask=src_att)
+        #             encoder_out = encoder_out['last_hidden_state']
 
-            for epsilon in [2.0, 3.0, 4.0, 5.0]: # * 0.9
-                data = Variable(encoder_out.clone().to(device), volatile=False)
-                data.requires_grad = True
-                with autocast():
-                    logit = cls_model(z=encoder_out.sum(dim=1))
-                    cls_loss = cls_criterion(logit, trg_label)
-                    cls_model.zero_grad()
-                    cls_scaler.scale(cls_loss).backward()
-                data_grad = data.grad.data
-                data = data - epsilon * data_grad
+        #     for epsilon in [2.0, 3.0, 4.0, 5.0]: # * 0.9
+        #         data = Variable(encoder_out.clone().to(device), volatile=False)
+        #         data.requires_grad = True
+        #         with autocast():
+        #             logit = cls_model(encoder_out=encoder_out)
+        #             cls_loss = cls_criterion(logit, trg_label)
+        #             cls_model.zero_grad()
+        #             cls_scaler.scale(cls_loss).backward()
+        #         data_grad = data.grad.data
+        #         data = data - epsilon * data_grad
 
-            generator_id = ae_model.greedy_decode(data,
-                                                    max_len=max_sequence_length,
-                                                    start_id=id_bos)
+        #         with torch.no_grad:
+        #             with autocast():
+        #                 decoder_out = aug_model.generate(src_input_ids=src_sequence, 
+        #                                                  src_attention_mask=src_att,
+        #                                                  z=data)
 
-            # Augmenting
-            decoder_out_token = decoder_out.argmax(dim=2)
-            augmented_output = aug_model.tokenizer.batch_decode(decoder_out_token, skip_special_tokens=True)
-            augmented_tokenized = aug_model.tokenizer(augmented_output, return_tensors='np',
-                                                  max_length=args.src_max_len, padding='max_length', truncation=True)
-            augmented_tokenized2 = aug_model.tokenizer(augmented_output, return_tensors='pt',
-                                        max_length=args.src_max_len, padding='max_length', truncation=True)
-            train_src_input_ids = np.concatenate((train_src_input_ids, augmented_tokenized['input_ids']))
-            train_src_attention_mask = np.concatenate((train_src_attention_mask, augmented_tokenized['attention_mask']))
-            train_src_token_type_ids = np.concatenate((train_src_token_type_ids, augmented_tokenized['token_type_ids']))
-            train_trg_list = np.concatenate((train_trg_list, trg_label))
+        #     # Augmenting
+        #     augmented_output = aug_model.tokenizer.batch_decode(decoder_out, skip_special_tokens=True)
+        #     # augmented_tokenized = aug_model.tokenizer(augmented_output, return_tensors='np',
+        #     #                                       max_length=args.src_max_len, padding='max_length', truncation=True)
+        #     # augmented_tokenized2 = aug_model.tokenizer(augmented_output, return_tensors='pt',
+        #     #                             max_length=args.src_max_len, padding='max_length', truncation=True)
+        #     # train_src_input_ids = np.concatenate((train_src_input_ids, augmented_tokenized['input_ids']))
+        #     # train_src_attention_mask = np.concatenate((train_src_attention_mask, augmented_tokenized['attention_mask']))
+        #     # train_src_token_type_ids = np.concatenate((train_src_token_type_ids, augmented_tokenized['token_type_ids']))
+        #     # train_trg_list = np.concatenate((train_trg_list, trg_label))
 
-            if i % int(len(dataloader_dict['aug_train'])*0.3) == 0:
-                src_token = aug_model.tokenizer.batch_decode(aug_src_sequence, skip_special_tokens=True)[0]
-                aug_token = augmented_output[0]
-                write_log(logger, 'Generated Examples')
-                write_log(logger, f'Source: {src_token}')
-                write_log(logger, f'Augmented: {aug_token}')
-                with torch.no_grad():
-                    logit = cls_model(input_ids=augmented_tokenized2['input_ids'].to(device),
-                                    attention_mask=augmented_tokenized2['attention_mask'].to(device),
-                                    token_type_ids=augmented_tokenized2['token_type_ids'].to(device))
-                    logit = logit['logits']
-                    confidence = softmax(logit)
-                write_log(logger, confidence)
+        #     if i % int(len(dataloader_dict['aug_train'])*0.3) == 0:
+        #         src_token = aug_model.tokenizer.batch_decode(aug_src_sequence, skip_special_tokens=True)[0]
+        #         aug_token = augmented_output[0]
+        #         write_log(logger, 'Generated Examples')
+        #         write_log(logger, f'Source: {src_token}')
+        #         write_log(logger, f'Augmented: {aug_token}')
+        #         with torch.no_grad():
+        #             logit = cls_model(input_ids=augmented_tokenized2['input_ids'].to(device),
+        #                             attention_mask=augmented_tokenized2['attention_mask'].to(device),
+        #                             token_type_ids=augmented_tokenized2['token_type_ids'].to(device))
+        #             logit = logit['logits']
+        #             confidence = softmax(logit)
+        #         write_log(logger, confidence)
 
-        dataset_dict['train'] = CustomDataset(src_list=train_src_input_ids, src_att_list=train_src_attention_mask,
-                                              src_seg_list=train_src_token_type_ids,
-                                              trg_list=train_trg_list, src_max_len=args.src_max_len)
-        dataloader_dict['train'] = DataLoader(dataset_dict['train'], drop_last=False,
-                                              batch_size=args.batch_size, shuffle=False, pin_memory=True,
-                                              num_workers=args.num_workers)
+        # dataset_dict['train'] = CustomDataset(src_list=train_src_input_ids, src_att_list=train_src_attention_mask,
+        #                                       src_seg_list=train_src_token_type_ids,
+        #                                       trg_list=train_trg_list, src_max_len=args.src_max_len)
+        # dataloader_dict['train'] = DataLoader(dataset_dict['train'], drop_last=False,
+        #                                       batch_size=args.batch_size, shuffle=False, pin_memory=True,
+        #                                       num_workers=args.num_workers)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name)
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type)
         save_file_name += 'checkpoint.pth.tar'
         if val_cls_loss < best_val_loss:
             write_log(logger, 'Checkpoint saving...')
             torch.save({
                 'epoch': epoch,
-                'model': cls_model.state_dict(),
-                'optimizer': cls_optimizer.state_dict(),
-                'scheduler': cls_scheduler.state_dict(),
-                'scaler': cls_scaler.state_dict()
+                'aug_model': aug_model.state_dict(),
+                'aug_optimizer': aug_optimizer.state_dict(),
+                'aug_scheduler': aug_scheduler.state_dict(),
+                'aug_scaler': aug_scaler.state_dict(),
+                'cls_model': cls_model.state_dict(),
+                'cls_optimizer': cls_optimizer.state_dict(),
+                'cls_scheduler': cls_scheduler.state_dict(),
+                'cls_scaler': cls_scaler.state_dict()
             }, save_file_name)
             best_val_loss = val_cls_loss
             best_epoch = epoch

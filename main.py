@@ -4,8 +4,7 @@ import argparse
 # Import custom modules
 from task.preprocessing import preprocessing
 from task.training import training
-from task.training2 import training2
-# from task.augmenting import augmenting/
+# from task.augmenting import augmenting
 # from task.testing import testing
 # Utils
 from utils import str2bool, path_check, set_random_seed
@@ -66,11 +65,11 @@ if __name__=='__main__':
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']
-    parser.add_argument('--cls_optimizer', default='Ralamb', type=str, choices=optim_list,
+    parser.add_argument('--cls_optimizer', default='AdamW', type=str, choices=optim_list,
                         help="Choose optimizer setting in 'AdamW', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--cls_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
-    parser.add_argument('--aug_optimizer', default='Ralamb', type=str, choices=optim_list,
+    parser.add_argument('--aug_optimizer', default='AdamW', type=str, choices=optim_list,
                         help="Choose optimizer setting in 'AdamW', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--aug_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")

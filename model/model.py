@@ -1,3 +1,4 @@
+import math
 # Import PyTorch
 import torch
 import torch.nn as nn
@@ -51,6 +52,10 @@ class TransformerModel(nn.Module):
         self.decoder = self.basemodel.decoder
         self.shared = self.basemodel.shared
 
+        # Encoding
+        self.position = PositionalEmbedding(d_model=self.d_hidden, max_len=360)
+        self.gru = nn.GRU(input_size=self.d_hidden, hidden_size=self.d_hidden, num_layers=3)
+
         # Linear Model Setting
         self.decoder_linear = nn.Linear(self.d_hidden, self.d_embedding)
         self.decoder_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
@@ -80,13 +85,15 @@ class TransformerModel(nn.Module):
         encoder_out = self.encoder(input_ids=src_input_ids, 
                                    attention_mask=src_attention_mask)
         encoder_out = encoder_out['last_hidden_state']
-        encoder_out_sum = encoder_out.sum(dim=1)
+        encoder_out, _ = self.gru(encoder_out)
+        encoder_out = F.sigmoid(encoder_out + self.position(src_input_ids)).sum(dim=1)
 
         # Decoding
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
-            encoder_hidden_states=encoder_out_sum
+            encoder_hidden_states=encoder_out,
+            encoder_attention_mask=src_attention_mask[:,0].unsqueeze(1)
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
 
@@ -97,55 +104,47 @@ class TransformerModel(nn.Module):
         return decoder_out, encoder_out
 
     @autocast()
-    def generate(self, src_input_ids, src_attention_mask):
+    def generate(self, src_input_ids, src_attention_mask, z):
 
         decoder_input_ids = None
         decoder_attention_mask = None
 
-        # decoder_input_ids, decoder_padding_mask, causal_mask = _prepare_bart_decoder_inputs(
-        #     self.model_config,
-        #     src_input_ids,
-        #     decoder_input_ids=decoder_input_ids,
-        #     decoder_padding_mask=decoder_attention_mask,
-        #     causal_mask_dtype=self.shared.weight.dtype,
-        # )
         decoder_input_ids = shift_tokens_right(
-            input_ids, self.config.pad_token_id, self.config.decoder_start_token_id
+            src_input_ids, self.model_config.pad_token_id, self.model_config.decoder_start_token_id
         )
 
         # Encoding
-        encoder_out = self.encoder(input_ids=src_input_ids, 
-                                   attention_mask=src_attention_mask)
-        encoder_out = encoder_out['last_hidden_state']
-        encoder_out_sum = encoder_out.sum(dim=1)
+        inp_ = decoder_input_ids[:,0].unsqueeze(1)
 
-        # Decoding
-        decoder_outputs = self.decoder(
-            input_ids=decoder_input_ids,
-            attention_mask=decoder_attention_mask,
-            encoder_hidden_states=encoder_out_sum,
-            encoder_attention_mask=src_attention_mask
-        )
-        decoder_outputs = decoder_outputs['last_hidden_state']
+        for i in range(360): # Need to fix
+            decoder_outputs = self.decoder(
+                input_ids=inp_,
+                attention_mask=decoder_attention_mask,
+                encoder_hidden_states=z,
+                encoder_attention_mask=src_attention_mask[:,0].unsqueeze(1)
+            )
+            decoder_outputs = decoder_outputs['last_hidden_state']
 
-        # Decoding
-        decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
-        decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
+            # Decoding
+            decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
+            decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
+            _, next_word = torch.max(decoder_out[:,-1], dim=1)
+            inp_ = torch.cat([inp_, next_word], dim=1)
 
-        return decoder_out, encoder_out
+        return inp_
 
 class ClassifierModel(nn.Module):
     def __init__(self, d_latent, num_labels: int = 2, dropout: float = 0.3):
         super().__init__()
 
-        self.linear1 = nn.Linear(d_latent, 200)
-        self.linear2 = nn.Linear(200, 100)
-        self.linear3 = nn.Linear(100, num_labels)
+        self.linear1 = nn.Linear(d_latent, 256)
+        self.linear2 = nn.Linear(256, 128)
+        self.linear3 = nn.Linear(128, num_labels)
         self.dropout = nn.Dropout(dropout)
 
     @autocast()
-    def forward(self, z):
-        out = self.dropout(F.gelu(self.linear1(z)))
+    def forward(self, encoder_out):
+        out = self.dropout(F.gelu(self.linear1(encoder_out)))
         out = self.dropout(F.gelu(self.linear2(out)))
         out = self.linear3(out)
 
@@ -200,3 +199,23 @@ def invert_mask(attention_mask):
 def fill_with_neg_inf(t):
     """FP16-compatible function that fills a input_ids with -inf."""
     return t.float().fill_(float("-inf")).type_as(t)
+
+class PositionalEmbedding(nn.Module):
+
+    def __init__(self, d_model, max_len=512):
+        super().__init__()
+
+        pe = torch.zeros(max_len, d_model, dtype=torch.float)
+        pe.require_grad = False
+
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = (torch.arange(0, d_model, 2, dtype=torch.float) * -(math.log(10000.0) / d_model)).exp()
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        return self.pe[:, :x.size(1)]
