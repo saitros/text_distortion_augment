@@ -71,7 +71,6 @@ class TransformerModel(nn.Module):
             self.bos_idx = self.tokenizer.bos_token_id
             self.eos_idx = self.tokenizer.eos_token_id
 
-    @autocast()
     def forward(self, src_input_ids, src_attention_mask):
 
         decoder_input_ids = None
@@ -85,8 +84,8 @@ class TransformerModel(nn.Module):
         encoder_out = self.encoder(input_ids=src_input_ids, 
                                    attention_mask=src_attention_mask)
         encoder_out = encoder_out['last_hidden_state']
-        encoder_out, _ = self.gru(encoder_out)
-        encoder_out = F.sigmoid(encoder_out + self.position(src_input_ids)).sum(dim=1)
+        encoder_out, _ = self.gru(encoder_out + self.position(src_input_ids))
+        encoder_out = encoder_out.sum(dim=1)
 
         # Decoding
         decoder_outputs = self.decoder(
@@ -103,7 +102,6 @@ class TransformerModel(nn.Module):
 
         return decoder_out, encoder_out
 
-    @autocast()
     def generate(self, src_input_ids, src_attention_mask, z):
 
         decoder_input_ids = None
@@ -142,7 +140,6 @@ class ClassifierModel(nn.Module):
         self.linear3 = nn.Linear(128, num_labels)
         self.dropout = nn.Dropout(dropout)
 
-    @autocast()
     def forward(self, encoder_out):
         out = self.dropout(F.gelu(self.linear1(encoder_out)))
         out = self.dropout(F.gelu(self.linear2(out)))

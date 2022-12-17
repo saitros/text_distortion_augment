@@ -134,9 +134,6 @@ def training(args):
     scheduler = shceduler_select(scheduler_model='constant', optimizer=optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
     cls_scheduler = shceduler_select(scheduler_model='constant', optimizer=cls_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
     aug_scheduler = shceduler_select(scheduler_model='constant', optimizer=aug_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
-    scaler = GradScaler()
-    cls_scaler = GradScaler()
-    aug_scaler = GradScaler()
     # total_iters = round(len(dataloader_dict['train'])/args.num_grad_accumulate*args.num_epochs)
     # scheduler = get_cosine_schedule_with_warmup(optimizer, round(total_iters*0.3), total_iters) # args.warmup_ratio = 0.3 -> Need to fix
 
@@ -157,7 +154,6 @@ def training(args):
         model.load_state_dict(checkpoint['model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         scheduler.load_state_dict(checkpoint['scheduler'])
-        scaler.load_state_dict(checkpoint['scaler'])
         del checkpoint
 
     #===================================#
@@ -187,20 +183,15 @@ def training(args):
             #===================================#
 
             # Augmenter training
-            with autocast():
-                decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
-                                                     src_attention_mask=src_att)
-                mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
-                recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
-
-                total_loss = mmd_loss + recon_loss
-                aug_scaler.scale(total_loss).backward()
-
+            decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
+                                                    src_attention_mask=src_att)
+            mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
+            recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
+            total_loss = mmd_loss + recon_loss
+            total_loss.backward()
             if args.clip_grad_norm > 0:
-                aug_scaler.unscale_(aug_optimizer)
                 clip_grad_norm_(aug_model.parameters(), args.clip_grad_norm)
-            aug_scaler.step(aug_optimizer)
-            aug_scaler.update()
+            aug_optimizer.step()
             aug_scheduler.step()
 
             #===================================#
@@ -208,16 +199,12 @@ def training(args):
             #===================================#
 
             # Classifier training
-            with autocast():
-                logit = cls_model(encoder_out=Variable(encoder_out.clone(), volatile=False))
-                cls_loss = cls_criterion(logit, trg_label)
-                cls_scaler.scale(cls_loss).backward()
-
+            logit = cls_model(encoder_out=Variable(encoder_out.clone(), volatile=False))
+            cls_loss = cls_criterion(logit, trg_label)
+            cls_loss.backward()
             if args.clip_grad_norm > 0:
-                cls_scaler.unscale_(cls_optimizer)
                 clip_grad_norm_(cls_model.parameters(), args.clip_grad_norm)
-            cls_scaler.step(cls_optimizer)
-            cls_scaler.update()
+            cls_optimizer.step()
             cls_scheduler.step()
                 
             # Print loss value only training
@@ -250,21 +237,17 @@ def training(args):
         
             with torch.no_grad():
                 # Augmenter training
-                with autocast():
-                    decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
-                                                         src_attention_mask=src_att)
-                    mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
-                    recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
-
-                decoder_out_token = decoder_out.argmax(dim=2)
+                decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
+                                                        src_attention_mask=src_att)
+                mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
+                recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
                 val_mmd_loss += mmd_loss
                 val_recon_loss += recon_loss
 
             with torch.no_grad():
-                with autocast():
-                    logit = cls_model(encoder_out=encoder_out)
-                    cls_loss = cls_criterion(logit, trg_label)
+                logit = cls_model(encoder_out=encoder_out)
+                cls_loss = cls_criterion(logit, trg_label)
             
             val_cls_loss += cls_loss
             val_acc += (logit.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
@@ -352,11 +335,9 @@ def training(args):
                 'aug_model': aug_model.state_dict(),
                 'aug_optimizer': aug_optimizer.state_dict(),
                 'aug_scheduler': aug_scheduler.state_dict(),
-                'aug_scaler': aug_scaler.state_dict(),
                 'cls_model': cls_model.state_dict(),
                 'cls_optimizer': cls_optimizer.state_dict(),
                 'cls_scheduler': cls_scheduler.state_dict(),
-                'cls_scaler': cls_scaler.state_dict()
             }, save_file_name)
             best_val_loss = val_cls_loss
             best_epoch = epoch
