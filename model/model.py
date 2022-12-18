@@ -75,7 +75,7 @@ class TransformerModel(nn.Module):
     def forward(self, src_input_ids, src_attention_mask):
 
         decoder_input_ids = None
-        decoder_attention_mask = None
+        # decoder_attention_mask = None
 
         decoder_input_ids = shift_tokens_right(
             src_input_ids, self.model_config.pad_token_id, self.model_config.decoder_start_token_id
@@ -87,15 +87,14 @@ class TransformerModel(nn.Module):
         encoder_out = encoder_out['last_hidden_state']
         # score = self.attention(encoder_out, encoder_out, src_attention_mask)
         # attent_memory = score.bmm(encoder_out)
-        encoder_out, _ = self.gru(encoder_out + self.position(src_input_ids))
-        encoder_out = encoder_out.sum(dim=1)
+        latent_out, _ = self.gru(encoder_out + self.position(src_input_ids))
+        latent_out = latent_out.mean(dim=1)
 
         # Decoding
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            attention_mask=decoder_attention_mask,
-            encoder_hidden_states=encoder_out,
-            encoder_attention_mask=src_attention_mask[:,0].unsqueeze(1)
+            encoder_hidden_states=encoder_out + latent_out.unsqueeze(dim=1),
+            encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
 
@@ -103,7 +102,7 @@ class TransformerModel(nn.Module):
         decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
         decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
 
-        return decoder_out, encoder_out
+        return decoder_out, encoder_out, latent_out
 
     def generate(self, src_input_ids, src_attention_mask, z):
 
@@ -138,15 +137,16 @@ class ClassifierModel(nn.Module):
     def __init__(self, d_latent, num_labels: int = 2, dropout: float = 0.3):
         super().__init__()
 
-        self.linear1 = nn.Linear(d_latent, 256)
-        self.linear2 = nn.Linear(256, 128)
-        self.linear3 = nn.Linear(128, num_labels)
+        self.linear1 = nn.Linear(d_latent, 512)
+        self.linear2 = nn.Linear(512, 256)
+        self.linear3 = nn.Linear(256, num_labels)
         self.dropout = nn.Dropout(dropout)
-        self.leaky_relu = nn.LeakyReLU(0.1)
+        self.leaky_relu = nn.LeakyReLU(0.2)
 
     def forward(self, encoder_out):
-        out = self.dropout(self.leaky_relu(self.linear1(encoder_out)))
-        out = self.dropout(self.leaky_relu(self.linear2(out)))
+        encoder_out = encoder_out.mean(dim=1)
+        out = self.dropout(F.gelu(self.linear1(encoder_out)))
+        out = self.dropout(F.gelu(self.linear2(out)))
         out = self.linear3(out)
 
         return out

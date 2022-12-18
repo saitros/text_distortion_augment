@@ -183,9 +183,11 @@ def training(args):
             #===================================#
 
             # Augmenter training
-            decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
-                                                    src_attention_mask=src_att)
-            # mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
+            decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+                                                            src_attention_mask=src_att)
+            encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
+            latent_out_copy = latent_out.clone().detach().requires_grad_(True)
+            # mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
             mmd_loss = torch.tensor(0.0)
             recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
             total_loss = mmd_loss + recon_loss
@@ -200,7 +202,7 @@ def training(args):
             #===================================#
 
             # Classifier training
-            logit = cls_model(encoder_out=Variable(encoder_out.clone(), volatile=False))
+            logit = cls_model(encoder_out=Variable(encoder_out_copy + latent_out_copy.unsqueeze(1), volatile=False))
             cls_loss = cls_criterion(logit, trg_label)
             cls_loss.backward()
             if args.clip_grad_norm > 0:
@@ -238,9 +240,9 @@ def training(args):
         
             with torch.no_grad():
                 # Augmenter training
-                decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
-                                                        src_attention_mask=src_att)
-                # mmd_loss = compute_mmd(encoder_out.view(args.batch_size, -1), z_var=args.z_variation) * 100
+                decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+                                                                 src_attention_mask=src_att)
+                # mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
                 mmd_loss = torch.tensor(0.0)
                 recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
@@ -248,7 +250,7 @@ def training(args):
                 val_recon_loss += recon_loss
 
             with torch.no_grad():
-                logit = cls_model(encoder_out=encoder_out)
+                logit = cls_model(encoder_out=encoder_out + latent_out.unsqueeze(1))
                 cls_loss = cls_criterion(logit, trg_label)
             
             val_cls_loss += cls_loss
