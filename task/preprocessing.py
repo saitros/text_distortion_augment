@@ -9,7 +9,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 # Import custom modules
 from task.utils import data_load
-from utils import TqdmLoggingHandler, write_log
+from utils import TqdmLoggingHandler, write_log, return_model_name
 
 from datasets import load_dataset
 
@@ -43,7 +43,8 @@ def preprocessing(args):
     write_log(logger, 'Tokenizer setting...')
     start_time = time.time()
 
-    tokenizer = AutoTokenizer.from_pretrained('facebook/bart-base')
+    model_name = return_model_name(args.model_type)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     processed_sequences = dict()
     processed_sequences['train'] = dict()

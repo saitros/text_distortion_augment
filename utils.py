@@ -95,3 +95,16 @@ def set_random_seed(seed:int):
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
+
+def return_model_name(model_type):
+    if model_type == 'bert':
+        out = 'bert-base-cased'
+    if model_type == 'albert':
+        out = 'textattack/albert-base-v2-imdb'
+    if model_type == 'deberta':
+        out = 'microsoft/deberta-v3-base'
+    if model_type == 'bart':
+        out = 'facebook/bart-base'
+    if model_type == 'kr_bart':
+        out = 'cosmoquester/bart-ko-mini'
+    return out

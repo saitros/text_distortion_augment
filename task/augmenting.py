@@ -13,6 +13,7 @@ from transformers import AutoTokenizer
 # Import PyTorch
 import torch
 import torch.nn as nn
+from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
@@ -21,6 +22,7 @@ from torch.cuda.amp import GradScaler, autocast
 from model.model import AugModel
 from model.dataset import CustomDataset
 from utils import TqdmLoggingHandler, write_log
+from task.utils import input_to_device
 
 def augmenting(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -46,14 +48,18 @@ def augmenting(args):
     write_log(logger, "Load data...")
     gc.disable()
 
-    save_path = os.path.join(args.preprocess_path, args.data_name)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
 
     with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'r') as f:
         train_src_input_ids = f.get('train_src_input_ids')[:]
-        train_src_attention_mask = f.get('train_src_attention_mask')[:]
-        train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
+        train_src_attention_mask = f.get('train_src_attention_mask')[:
         train_trg_list = f.get('train_label')[:]
         train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
+        if args.model_type == 'bert':
+            train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
+        else:
+            train_src_token_type_ids = list()
+        
 
     with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
         data_ = pickle.load(f)
@@ -64,6 +70,7 @@ def augmenting(args):
 
     gc.enable()
     write_log(logger, "Finished loading data!")
+
 
     #===================================#
     #===========Train setting===========#
@@ -91,10 +98,10 @@ def augmenting(args):
     
     # 3) Model loading
     cudnn.benchmark = True
-    save_file_name = os.path.join(args.model_save_path, args.data_name)
-    save_file_name += 'checkpoint.pth.tar'
+    save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
     checkpoint = torch.load(save_file_name)
-    model.load_state_dict(checkpoint['model'])
+    aug_model.load_state_dict(checkpoint['aug_model'])
+    cls_model.load_state_dict(checkpoint['cls_model'])
     write_log(logger, f'Loaded model from {save_file_name}')
 
     #===================================#
@@ -104,37 +111,42 @@ def augmenting(args):
     start_time_e = time()
     write_log(logger, 'Augmenting start...')
     model.eval()
-    tokenizer = AutoTokenizer.from_pretrained('bert-base-cased')
     seq_list = list()
     aug_list = list()
-    aug2_list = list()
 
     for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
         # Input setting
-        src_sequence = batch_iter[0]
-        src_att = batch_iter[1]
-        src_seg = batch_iter[2]
-        trg_label = batch_iter[3]
+        b_iter = input_to_device(batch_iter, device=device)
+        src_sequence, src_att, src_seg, trg_label = b_iter
 
-        src_sequence = src_sequence.to(device, non_blocking=True)
-        src_att = src_att.to(device, non_blocking=True)
-        src_seg = src_seg.to(device, non_blocking=True)
-        trg_label = trg_label.to(device, non_blocking=True)
-
+        # Augmenter
         with torch.no_grad():
-            with autocast():
-                encoder_out, decoder_out, z = model(src_input_ids=src_sequence, 
-                                                    src_attention_mask=src_att,
-                                                    src_token_type_ids=src_seg)
+            decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+                                                                src_attention_mask=src_att)
+        encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
+        latent_out_copy = latent_out.clone().detach().requires_grad_(True)
 
-                decoder_out2 = model.generate(src_input_ids=src_sequence, 
-                                              src_attention_mask=src_att,
-                                              src_token_type_ids=src_seg)
-        # 
-        seq_list.extend(tokenizer.batch_decode(src_sequence))
-        aug_list.extend(tokenizer.batch_decode(decoder_out.argmax(dim=2)))
-        aug2_list.extend(tokenizer.batch_decode(decoder_out2.argmax(dim=2)))
+        for epsilon in [2.0, 3.0, 4.0, 5.0]: # * 0.9
+            data = Variable(encoder_out_copy + latent_out_copy.unsqueeze(1), volatile=False)
+            data.requires_grad = True
+
+            logit = cls_model(encoder_out=data)
+            cls_loss = cls_criterion(logit, trg_label)
+            cls_model.zero_grad()
+            cls_loss.backward()
+            data_grad = data.grad
+            data = data - epsilon * data_grad
+
+            with torch.no_grad():
+                with autocast():
+                    decoder_out = aug_model.generate(src_input_ids=src_sequence, 
+                                                     src_attention_mask=src_att,
+                                                     z=data)
+
+            # Augmenting
+            augmented_output = aug_model.tokenizer.batch_decode(decoder_out, skip_special_tokens=True)
+            src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
 
     result_dat = pd.DataFrame({
         'seq': seq_list,

@@ -11,7 +11,7 @@ from transformers import AlbertConfig, AlbertForSequenceClassification
 from transformers import DebertaConfig, DebertaForSequenceClassification
 from transformers import BertConfig, BertModel, BertForSequenceClassification
 # Import Custom Modules
-from model.utils import return_model_name
+from utils import return_model_name
 
 class TransformerModel(nn.Module):
     def __init__(self, model_type: str = 'bart',
@@ -44,7 +44,7 @@ class TransformerModel(nn.Module):
         else:
             self.d_hidden = self.model_config.d_model
         self.d_embedding = int(self.d_hidden / 2)
-        self.vocab_num = self.model_config.vocab_size
+        self.vocab_num = self.model_config.vocab_size + 1
 
         # Pre-trained Model Setting
         self.basemodel = AutoModel.from_pretrained(model_name)
@@ -87,13 +87,13 @@ class TransformerModel(nn.Module):
         encoder_out = encoder_out['last_hidden_state']
         # score = self.attention(encoder_out, encoder_out, src_attention_mask)
         # attent_memory = score.bmm(encoder_out)
-        latent_out, _ = self.gru(encoder_out + self.position(src_input_ids))
-        latent_out = latent_out.mean(dim=1)
+        # latent_out, _ = self.gru(encoder_out + self.position(src_input_ids))
+        # latent_out = latent_out.mean(dim=1)
 
         # Decoding
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=encoder_out + latent_out.unsqueeze(dim=1),
+            encoder_hidden_states=encoder_out,
             encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
@@ -102,7 +102,7 @@ class TransformerModel(nn.Module):
         decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
         decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
 
-        return decoder_out, encoder_out, latent_out
+        return decoder_out, encoder_out
 
     def generate(self, src_input_ids, src_attention_mask, z):
 
@@ -116,12 +116,11 @@ class TransformerModel(nn.Module):
         # Encoding
         inp_ = decoder_input_ids[:,0].unsqueeze(1)
 
-        for i in range(360): # Need to fix
+        for i in range(150): # Need to fix
             decoder_outputs = self.decoder(
                 input_ids=inp_,
-                attention_mask=decoder_attention_mask,
                 encoder_hidden_states=z,
-                encoder_attention_mask=src_attention_mask[:,0].unsqueeze(1)
+                encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
             )
             decoder_outputs = decoder_outputs['last_hidden_state']
 
@@ -129,7 +128,7 @@ class TransformerModel(nn.Module):
             decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
             decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
             _, next_word = torch.max(decoder_out[:,-1], dim=1)
-            inp_ = torch.cat([inp_, next_word], dim=1)
+            inp_ = torch.cat([inp_, next_word.unsqueeze(1)], dim=1)
 
         return inp_
 
@@ -144,10 +143,10 @@ class ClassifierModel(nn.Module):
         self.leaky_relu = nn.LeakyReLU(0.2)
 
     def forward(self, encoder_out):
-        encoder_out = encoder_out.mean(dim=1)
+        # encoder_out = encoder_out.mean(dim=1)
         out = self.dropout(F.gelu(self.linear1(encoder_out)))
         out = self.dropout(F.gelu(self.linear2(out)))
-        out = self.linear3(out)
+        out = self.linear3(out).mean(dim=1)
 
         return out
 

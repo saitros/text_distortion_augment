@@ -46,6 +46,57 @@ def data_load(args):
         src_list['test'] = test_dat['comment'].tolist()
         trg_list['test'] = test_dat['sentiment'].tolist()
 
+    if args.data_name == 'sst2':
+        dataset = load_dataset("glue", args.data_name)
+        train_dat = pd.DataFrame(dataset['train'])
+        valid_dat = pd.DataFrame(dataset['valid'])
+        test_dat = pd.DataFrame(dataset['test'])
+
+        src_list['train'] = train_dat['sentence'].tolist()
+        trg_list['train'] = train_dat['label'].tolist()
+
+        src_list['valid'] = valid_dat['sentence'].tolist()
+        trg_list['valid'] = valid_dat['label'].tolist()
+
+        src_list['test'] = test_dat['sentence'].tolist()
+        trg_list['test'] = test_dat['label'].tolist()
+
+    if args.data_name == 'cola':
+        dataset = load_dataset("glue", args.data_name)
+        train_dat = pd.DataFrame(dataset['train'])
+        valid_dat = pd.DataFrame(dataset['valid'])
+        test_dat = pd.DataFrame(dataset['test'])
+
+        src_list['train'] = train_dat['sentence'].tolist()
+        trg_list['train'] = train_dat['label'].tolist()
+
+        src_list['valid'] = valid_dat['sentence'].tolist()
+        trg_list['valid'] = valid_dat['label'].tolist()
+
+        src_list['test'] = test_dat['sentence'].tolist()
+        trg_list['test'] = test_dat['label'].tolist()
+
+    if args.data_name == 'korean_hate_speech':
+        args.data_path = os.path.join(args.data_path,'korean-hate-speech-detection')
+
+        train_dat = pd.read_csv(os.path.join(args.data_path, 'train.hate.csv'))
+        valid_dat = pd.read_csv(os.path.join(args.data_path, 'dev.hate.csv'))
+        test_dat = pd.read_csv(os.path.join(args.data_path, 'test.hate.no_label.csv'))
+
+        train_dat['label'] = train_dat['label'].replace('none', 0)
+        train_dat['label'] = train_dat['label'].replace('hate', 1)
+        train_dat['label'] = train_dat['label'].replace('offensive', 2)
+        valid_dat['label'] = valid_dat['label'].replace('none', 0)
+        valid_dat['label'] = valid_dat['label'].replace('hate', 1)
+        valid_dat['label'] = valid_dat['label'].replace('offensive', 2)
+
+        src_list['train'] = train_dat['comments'].tolist()
+        trg_list['train'] = train_dat['label'].tolist()
+        src_list['valid'] = valid_dat['comments'].tolist()
+        trg_list['valid'] = valid_dat['label'].tolist()
+        src_list['test'] = test_dat['comments'].tolist()
+        trg_list['test'] = [0 for _ in range(len(test_dat))]
+        
     return src_list, trg_list
 
 def input_to_device(batch_iter, device):

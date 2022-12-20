@@ -22,9 +22,6 @@ def main(args):
 
     if args.training:
         training(args)
-    
-    if args.training2:
-        training2(args)
 
     # if args.augmenting:
     #     augmenting(args)
@@ -40,7 +37,6 @@ if __name__=='__main__':
     # Task setting
     parser.add_argument('--preprocessing', action='store_true')
     parser.add_argument('--training', action='store_true')
-    parser.add_argument('--training2', action='store_true')
     parser.add_argument('--augmenting', action='store_true')
     parser.add_argument('--resume', action='store_true')
     # Path setting
@@ -65,13 +61,13 @@ if __name__=='__main__':
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']
-    parser.add_argument('--cls_optimizer', default='AdamW', type=str, choices=optim_list,
+    parser.add_argument('--cls_optimizer', default='Ralamb', type=str, choices=optim_list,
                         help="Choose optimizer setting in 'AdamW', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--cls_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
-    parser.add_argument('--aug_optimizer', default='AdamW', type=str, choices=optim_list,
+    parser.add_argument('--aug_optimizer', default='Ralamb', type=str, choices=optim_list,
                         help="Choose optimizer setting in 'AdamW', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
-    parser.add_argument('--aug_scheduler', default='warmup', type=str, choices=scheduler_list,
+    parser.add_argument('--aug_scheduler', default='constant', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
     parser.add_argument('--cls_lr', default=5e-4, type=float,
                         help='Maximum learning rate of warmup scheduler; Default is 5e-4')
