@@ -161,6 +161,29 @@ def training_mmd(args):
         # Training step
         model.train()
 
+        for i, input_ in enumerate(tqdm(dataloader_dict['train'], 
+                                   bar_format='{percentage:3.2f}%|{bar:50}{r_bar}')):
+
+            optimizer.zero_grad()
+            
+            # Input setting
+            src_sequence = input_[0].to(device, non_blocking=True)
+            src_att = input_[1].to(device, non_blocking=True)
+            src_seg = input_[2].to(device, non_blocking=True)
+            trg_label = input_[3].to(device, non_blocking=True)
+            
+            with autocast():
+                output = model.origin_classify_(src_input_ids=src_sequence,
+                                               src_attention_mask=src_att,
+                                               src_token_type_ids=src_seg)
+                
+                
+                
+                
+                cls_loss = cls_metric(logit, trg_label)/args.num_grad_accumulate
+        
+            
+        
         while True:
 
             #===================================#

@@ -158,3 +158,11 @@ class TransformerModel(nn.Module):
 
         logit = self.origin_classifier(encoder_out[:, 0, :])
         return encoder_out[:, 0, :], logit
+    
+    @autocast()
+        encoder_out = self.encoder_model(input_ids=src_input_ids, 
+                                         attention_mask=src_attention_mask,
+                                         token_type_ids=src_token_type_ids)
+        encoder_out = encoder_out['last_hidden_state']
+        
+        return encoder_out
