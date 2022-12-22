@@ -44,7 +44,7 @@ class TransformerModel(nn.Module):
         else:
             self.d_hidden = self.model_config.d_model
         self.d_embedding = int(self.d_hidden / 2)
-        self.vocab_num = self.model_config.vocab_size + 1
+        self.vocab_num = self.model_config.vocab_size
 
         # Pre-trained Model Setting
         self.basemodel = AutoModel.from_pretrained(model_name)
@@ -85,16 +85,16 @@ class TransformerModel(nn.Module):
         encoder_out = self.encoder(input_ids=src_input_ids, 
                                    attention_mask=src_attention_mask)
         encoder_out = encoder_out['last_hidden_state']
-        # score = self.attention(encoder_out, encoder_out, src_attention_mask)
-        # attent_memory = score.bmm(encoder_out)
-        # latent_out, _ = self.gru(encoder_out + self.position(src_input_ids))
-        # latent_out = latent_out.mean(dim=1)
+        encoder_out = encoder_out + self.position(src_input_ids)
+        encoder_out = encoder_out.transpose(0, 1)
+        latent_out, _ = self.gru(encoder_out)
+        latent_out = latent_out.mean(dim=0)
 
         # Decoding
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=encoder_out,
-            encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
+            encoder_hidden_states=latent_out,
+            encoder_attention_mask=src_attention_mask[:,0].unsqueeze(1)
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
 
@@ -102,7 +102,7 @@ class TransformerModel(nn.Module):
         decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
         decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
 
-        return decoder_out, encoder_out
+        return decoder_out, encoder_out, latent_out
 
     def generate(self, src_input_ids, src_attention_mask, z):
 

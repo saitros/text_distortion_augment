@@ -124,7 +124,6 @@ def training(args):
     aug_scheduler = shceduler_select(scheduler_model=args.aug_scheduler, optimizer=aug_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
 
     cudnn.benchmark = True
-    softmax = nn.Softmax(dim=1)
     cls_criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps).to(device)
     recon_criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=aug_model.pad_idx).to(device)
 
@@ -147,7 +146,8 @@ def training(args):
     #===================================#
 
     write_log(logger, 'Traing start!')
-    best_val_loss = 1e+4
+    best_aug_val_loss = 1e+4
+    best_cls_val_loss = 1e+4
     
     for epoch in range(start_epoch + 1, args.num_epochs + 1):
         start_time_e = time()
@@ -169,12 +169,12 @@ def training(args):
             #===================================#
 
             # Augmenter training
-            decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
-                                                 src_attention_mask=src_att)
-            encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-            # latent_out_copy = latent_out.clone().detach().requires_grad_(True)
-            # mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
-            mmd_loss = torch.tensor(0.0)
+            decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+                                                                src_attention_mask=src_att)
+            # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
+            latent_out_copy = latent_out.clone().detach().requires_grad_(True)
+            mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
+
             recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
             total_loss = mmd_loss + recon_loss
             total_loss.backward()
@@ -210,10 +210,9 @@ def training(args):
         
             with torch.no_grad():
                 # Augmenter training
-                decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
+                decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
                                                                  src_attention_mask=src_att)
-                # mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
-                mmd_loss = torch.tensor(0.0)
+                mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
                 recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
                 val_mmd_loss += mmd_loss
@@ -235,6 +234,21 @@ def training(args):
         # write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         # write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'aug_checkpoint.pth.tar')
+        if val_recon_loss < best_aug_val_loss:
+            write_log(logger, 'Checkpoint saving...')
+            torch.save({
+                'epoch': epoch,
+                'aug_model': aug_model.state_dict(),
+                'aug_optimizer': aug_optimizer.state_dict(),
+                'aug_scheduler': aug_scheduler.state_dict()
+            }, save_file_name)
+            best_aug_val_loss = val_recon_loss
+            best_epoch = epoch
+        else:
+            else_log = f'Still {best_epoch} epoch Loss({round(best_aug_val_loss.item(), 2)}) is better...'
+            write_log(logger, else_log)
+
     for epoch in range(start_epoch + 1, args.num_epochs + 1):
         start_time_e = time()
 
@@ -251,17 +265,17 @@ def training(args):
 
             with torch.no_grad():
                 # Augmenter training
-                decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
-                                                                src_attention_mask=src_att)
-            encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-            # latent_out_copy = latent_out.clone().detach().requires_grad_(True)
+                decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+                                                                 src_attention_mask=src_att)
+            # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
+            latent_out_copy = latent_out.clone().detach().requires_grad_(True)
 
             #===================================#
             #=======Classifier Training=========#
             #===================================#
 
             # Classifier training
-            logit = cls_model(encoder_out=encoder_out_copy)
+            logit = cls_model(encoder_out=latent_out_copy)
             cls_loss = cls_criterion(logit, trg_label)
             cls_loss.backward()
             if args.clip_grad_norm > 0:
@@ -296,12 +310,12 @@ def training(args):
         
             with torch.no_grad():
                 # Augmenter training
-                decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
+                decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
                                                                  src_attention_mask=src_att)
                 # mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
 
             with torch.no_grad():
-                logit = cls_model(encoder_out=encoder_out)
+                logit = cls_model(encoder_out=latent_out)
                 cls_loss = cls_criterion(logit, trg_label)
 
             val_cls_loss += cls_loss
@@ -379,22 +393,19 @@ def training(args):
         #                                       batch_size=args.batch_size, shuffle=False, pin_memory=True,
         #                                       num_workers=args.num_workers)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
-        if val_cls_loss < best_val_loss:
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'cls_checkpoint.pth.tar')
+        if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Checkpoint saving...')
             torch.save({
                 'epoch': epoch,
-                'aug_model': aug_model.state_dict(),
-                'aug_optimizer': aug_optimizer.state_dict(),
-                'aug_scheduler': aug_scheduler.state_dict(),
                 'cls_model': cls_model.state_dict(),
                 'cls_optimizer': cls_optimizer.state_dict(),
                 'cls_scheduler': cls_scheduler.state_dict(),
             }, save_file_name)
-            best_val_loss = val_cls_loss
+            best_cls_val_loss = val_cls_loss
             best_epoch = epoch
         else:
-            else_log = f'Still {best_epoch} epoch Loss({round(best_val_loss.item(), 2)}) is better...'
+            else_log = f'Still {best_epoch} epoch Loss({round(best_cls_val_loss.item(), 2)}) is better...'
             write_log(logger, else_log)
 
     #===================================#
@@ -404,17 +415,18 @@ def training(args):
 
         b_iter = input_to_device(batch_iter, device=device)
         src_sequence, src_att, src_seg, trg_label = b_iter
+        trg_label = torch.flip(trg_label, dims=[1])
         # trg_label = trg_label.cpu().numpy()
 
         # Augmenter training
         with torch.no_grad():
             decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
                                                  src_attention_mask=src_att)
-        encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-        # latent_out_copy = latent_out.clone().detach().requires_grad_(True)
+        # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
+        latent_out_copy = latent_out.clone().detach().requires_grad_(True)
 
         for epsilon in [10.0]: # * 0.9
-            data = Variable(encoder_out_copy, volatile=False)
+            data = Variable(latent_out_copy, volatile=False)
             data.requires_grad = True
 
             logit = cls_model(encoder_out=data)
