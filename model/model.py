@@ -145,7 +145,7 @@ class ClassifierModel(nn.Module):
         # encoder_out = encoder_out.mean(dim=1)
         out = self.dropout(F.gelu(self.linear1(encoder_out)))
         out = self.dropout(F.gelu(self.linear2(out)))
-        out = self.linear3(out)#.mean(dim=1)
+        out = self.linear3(out).mean(dim=1)
 
         return out
 

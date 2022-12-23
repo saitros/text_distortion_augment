@@ -182,6 +182,9 @@ def training(args):
             aug_optimizer.step()
             aug_scheduler.step()
 
+            if args.debuging_mode:
+                break
+
             # Print loss value only training
             if i == 0 or i % args.print_freq == 0 or i == len(dataloader_dict['train'])-1:
                 iter_log = "[Epoch:%03d][%03d/%03d] train_recon_loss:%03.2f | train_mmd_loss:%03.2f | learning_rate:%1.6f | spend_time:%02.2fmin" % \
@@ -216,6 +219,9 @@ def training(args):
 
                 val_mmd_loss += mmd_loss
                 val_recon_loss += recon_loss
+
+            if args.debuging_mode:
+                break
 
         val_recon_loss /= len(dataloader_dict['valid'])
         val_mmd_loss /= len(dataloader_dict['valid'])
@@ -277,6 +283,9 @@ def training(args):
                     (epoch, i, len(dataloader_dict['train'])-1, cls_loss.item(), cls_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                 write_log(logger, iter_log)
 
+            if args.debuging_mode:
+                break
+
         #===================================#
         #============Validation=============#
         #===================================#
@@ -300,14 +309,16 @@ def training(args):
                 # Augmenter training
                 decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
                                                                  src_attention_mask=src_att)
-                # mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
 
             with torch.no_grad():
-                logit = cls_model(encoder_out=latent_out)
+                logit = cls_model(encoder_out=encoder_out+latent_out.unsqueeze(1))
                 cls_loss = cls_criterion(logit, trg_label)
 
             val_cls_loss += cls_loss
             val_acc += (logit.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
+
+            if args.debuging_mode:
+                break
 
         val_cls_loss /= len(dataloader_dict['valid'])
         val_acc /= len(dataloader_dict['valid'])
@@ -402,6 +413,7 @@ def training(args):
 
     seq_list = list()
     aug_list = dict()
+    aug_list['origin'] = list()
     aug_list['eps_2'] = list()
     aug_list['eps_3'] = list()
     aug_list['eps_4'] = list()
@@ -418,7 +430,8 @@ def training(args):
         # Augmenter
         with torch.no_grad():
             decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
-                                                                src_attention_mask=src_att)
+                                                             src_attention_mask=src_att)
+        encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
         latent_out_copy = latent_out.clone().detach().requires_grad_(True)
         src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
         seq_list.extend(src_output)
@@ -426,7 +439,7 @@ def training(args):
         aug_list['origin'].extend(aug_model.tokenizer.batch_decode(decoder_out.argmax(dim=2), skip_special_tokens=True))
 
         for epsilon in [2, 3, 4, 5]: # * 0.9
-            data = Variable(latent_out_copy, volatile=False)
+            data = Variable(encoder_out_copy+latent_out_copy.unsqueeze(1), volatile=False)
             data.requires_grad = True
 
             logit = cls_model(encoder_out=data)
@@ -439,8 +452,8 @@ def training(args):
             with torch.no_grad():
                 with autocast():
                     decoder_out = aug_model.generate(src_input_ids=src_sequence, 
-                                                    src_attention_mask=src_att,
-                                                    z=data)
+                                                     src_attention_mask=src_att,
+                                                     z=data)
 
             # Augmenting
             augmented_output = aug_model.tokenizer.batch_decode(decoder_out, skip_special_tokens=True)
@@ -449,7 +462,7 @@ def training(args):
         src_token = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
         write_log(logger, 'Generated Examples')
         write_log(logger, f'Source: {src_token[0]}')
-        write_log(logger, f'Augmented_origin: {src_output[0]}')
+        write_log(logger, f'Augmented_origin: {aug_list["origin"][0]}')
         write_log(logger, f'Augmented_2: {aug_list["eps_2"][0]}')
         write_log(logger, f'Augmented_3: {aug_list["eps_3"][0]}')
         write_log(logger, f'Augmented_4: {aug_list["eps_4"][0]}')

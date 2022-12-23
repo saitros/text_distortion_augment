@@ -39,6 +39,7 @@ if __name__=='__main__':
     parser.add_argument('--training', action='store_true')
     parser.add_argument('--augmenting', action='store_true')
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--debuging_mode', action='store_true')
     # Path setting
     parser.add_argument('--data_name', default='IMDB', type=str,
                         help='Data name; Default is IMDB')
