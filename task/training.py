@@ -149,7 +149,7 @@ def training(args):
     best_aug_val_loss = 1e+4
     best_cls_val_loss = 1e+4
     
-    for epoch in range(start_epoch + 1, args.num_epochs + 1):
+    for epoch in range(start_epoch + 1, args.aug_num_epochs + 1):
         start_time_e = time()
 
         write_log(logger, 'Augmenter training start...')
@@ -171,7 +171,6 @@ def training(args):
             # Augmenter training
             decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
                                                                 src_attention_mask=src_att)
-            # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
             latent_out_copy = latent_out.clone().detach().requires_grad_(True)
             mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
 
@@ -218,21 +217,10 @@ def training(args):
                 val_mmd_loss += mmd_loss
                 val_recon_loss += recon_loss
 
-            # with torch.no_grad():
-            #     logit = cls_model(encoder_out=encoder_out)
-            #     cls_loss = cls_criterion(logit, trg_label)
-
-            # val_cls_loss += cls_loss
-            # val_acc += (logit.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
-
         val_recon_loss /= len(dataloader_dict['valid'])
         val_mmd_loss /= len(dataloader_dict['valid'])
-        # val_cls_loss /= len(dataloader_dict['valid'])
-        # val_acc /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
         write_log(logger, 'Augmenter Validation MMD Loss: %3.3f' % val_mmd_loss)
-        # write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
-        # write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
         save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'aug_checkpoint.pth.tar')
         if val_recon_loss < best_aug_val_loss:
@@ -249,7 +237,7 @@ def training(args):
             else_log = f'Still {best_epoch} epoch Loss({round(best_aug_val_loss.item(), 2)}) is better...'
             write_log(logger, else_log)
 
-    for epoch in range(start_epoch + 1, args.num_epochs + 1):
+    for epoch in range(start_epoch + 1, args.cls_num_epochs + 1):
         start_time_e = time()
 
         write_log(logger, 'Classifier training start...')
@@ -267,7 +255,7 @@ def training(args):
                 # Augmenter training
                 decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
                                                                  src_attention_mask=src_att)
-            # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
+            encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
             latent_out_copy = latent_out.clone().detach().requires_grad_(True)
 
             #===================================#
@@ -275,7 +263,7 @@ def training(args):
             #===================================#
 
             # Classifier training
-            logit = cls_model(encoder_out=latent_out_copy)
+            logit = cls_model(encoder_out=encoder_out_copy+latent_out_copy.unsqueeze(1))
             cls_loss = cls_criterion(logit, trg_label)
             cls_loss.backward()
             if args.clip_grad_norm > 0:
@@ -411,21 +399,33 @@ def training(args):
     #===================================#
     #=========Text Augmentation=========#
     #===================================#
+
+    seq_list = list()
+    aug_list = dict()
+    aug_list['eps_2'] = list()
+    aug_list['eps_3'] = list()
+    aug_list['eps_4'] = list()
+    aug_list['eps_5'] = list()
+
     for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
+        # Input setting
         b_iter = input_to_device(batch_iter, device=device)
         src_sequence, src_att, src_seg, trg_label = b_iter
-        trg_label = torch.flip(trg_label, dims=[1])
-        # trg_label = trg_label.cpu().numpy()
+    #     trg_label = torch.flip(trg_label, dims=[1])
+        trg_label = torch.full((len(trg_label), num_labels), 1 / num_labels).to(device)
 
-        # Augmenter training
+        # Augmenter
         with torch.no_grad():
-            decoder_out, encoder_out = aug_model(src_input_ids=src_sequence, 
-                                                 src_attention_mask=src_att)
-        # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
+            decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+                                                                src_attention_mask=src_att)
         latent_out_copy = latent_out.clone().detach().requires_grad_(True)
+        src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
+        seq_list.extend(src_output)
+        
+        aug_list['origin'].extend(aug_model.tokenizer.batch_decode(decoder_out.argmax(dim=2), skip_special_tokens=True))
 
-        for epsilon in [10.0]: # * 0.9
+        for epsilon in [2, 3, 4, 5]: # * 0.9
             data = Variable(latent_out_copy, volatile=False)
             data.requires_grad = True
 
@@ -434,22 +434,26 @@ def training(args):
             cls_model.zero_grad()
             cls_loss.backward()
             data_grad = data.grad
-            data = data - epsilon * data_grad
+            data = data - ((epsilon * 0.8) * data_grad)
 
             with torch.no_grad():
                 with autocast():
                     decoder_out = aug_model.generate(src_input_ids=src_sequence, 
-                                                        src_attention_mask=src_att,
-                                                        z=data)
+                                                    src_attention_mask=src_att,
+                                                    z=data)
 
-        # Augmenting
-        augmented_output = aug_model.tokenizer.batch_decode(decoder_out, skip_special_tokens=True)
+            # Augmenting
+            augmented_output = aug_model.tokenizer.batch_decode(decoder_out, skip_special_tokens=True)
+            aug_list[f'eps_{epsilon}'].extend(augmented_output)
 
-        src_token = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
-        aug_token = augmented_output[0]
+        src_token = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
         write_log(logger, 'Generated Examples')
-        write_log(logger, f'Source: {src_token}')
-        write_log(logger, f'Augmented: {aug_token}')
+        write_log(logger, f'Source: {src_token[0]}')
+        write_log(logger, f'Augmented_origin: {src_output[0]}')
+        write_log(logger, f'Augmented_2: {aug_list["eps_2"][0]}')
+        write_log(logger, f'Augmented_3: {aug_list["eps_3"][0]}')
+        write_log(logger, f'Augmented_4: {aug_list["eps_4"][0]}')
+        write_log(logger, f'Augmented_5: {aug_list["eps_5"][0]}')
         if i == 3:
             break
 

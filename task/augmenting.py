@@ -19,7 +19,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler, autocast
 # Import custom modules
-from model.model import AugModel
+from model.model import TransformerModel, ClassifierModel
 from model.dataset import CustomDataset
 from utils import TqdmLoggingHandler, write_log
 from task.utils import input_to_device
@@ -52,7 +52,7 @@ def augmenting(args):
 
     with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'r') as f:
         train_src_input_ids = f.get('train_src_input_ids')[:]
-        train_src_attention_mask = f.get('train_src_attention_mask')[:
+        train_src_attention_mask = f.get('train_src_attention_mask')[:]
         train_trg_list = f.get('train_label')[:]
         train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
         if args.model_type == 'bert':
@@ -71,17 +71,17 @@ def augmenting(args):
     gc.enable()
     write_log(logger, "Finished loading data!")
 
-
     #===================================#
     #===========Train setting===========#
     #===================================#
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = AugModel(encoder_model_type='bert', decoder_model_type='bert',
-                     isPreTrain=args.isPreTrain, z_variation=args.z_variation,
-                     src_max_len=args.src_max_len, dropout=args.dropout)
-    model.to(device)
+    aug_model = TransformerModel(model_type=args.model_type,
+                                 isPreTrain=args.isPreTrain, dropout=args.dropout)
+    cls_model = ClassifierModel(d_latent=aug_model.d_hidden, num_labels=num_labels, dropout=args.dropout)
+    aug_model.to(device)
+    cls_model.to(device)
 
     # 2) Dataloader setting
     dataset_dict = {
@@ -95,14 +95,17 @@ def augmenting(args):
                             num_workers=args.num_workers)
     }
     write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
-    
+
     # 3) Model loading
     cudnn.benchmark = True
-    save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
-    checkpoint = torch.load(save_file_name)
-    aug_model.load_state_dict(checkpoint['aug_model'])
-    cls_model.load_state_dict(checkpoint['cls_model'])
-    write_log(logger, f'Loaded model from {save_file_name}')
+    aug_save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'aug_checkpoint.pth.tar')
+    cls_save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'cls_checkpoint.pth.tar')
+    aug_checkpoint = torch.load(aug_save_file_name)
+    cls_checkpoint = torch.load(cls_save_file_name)
+    aug_model.load_state_dict(aug_checkpoint['aug_model'])
+    cls_model.load_state_dict(cls_checkpoint['cls_model'])
+    write_log(logger, f'Loaded augmenter model from {aug_save_file_name}')
+    write_log(logger, f'Loaded classifier model from {cls_save_file_name}')
 
     #===================================#
     #=========Model Train Start=========#
@@ -110,25 +113,36 @@ def augmenting(args):
     
     start_time_e = time()
     write_log(logger, 'Augmenting start...')
-    model.eval()
+    aug_model.eval()
+    cls_model.eval()
     seq_list = list()
-    aug_list = list()
+    aug_list = dict()
+    aug_list['origin'] = list()
+    aug_list['eps_2'] = list()
+    aug_list['eps_3'] = list()
+    aug_list['eps_4'] = list()
+    aug_list['eps_5'] = list()
 
     for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
         # Input setting
         b_iter = input_to_device(batch_iter, device=device)
         src_sequence, src_att, src_seg, trg_label = b_iter
+    #     trg_label = torch.flip(trg_label, dims=[1])
+        trg_label = torch.full((len(trg_label), num_labels), 1 / num_labels).to(device)
 
         # Augmenter
         with torch.no_grad():
             decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
                                                                 src_attention_mask=src_att)
-        encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
         latent_out_copy = latent_out.clone().detach().requires_grad_(True)
+        src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
+        seq_list.extend(src_output)
+        
+        aug_list['origin'].extend(aug_model.tokenizer.batch_decode(decoder_out.argmax(dim=2), skip_special_tokens=True))
 
-        for epsilon in [2.0, 3.0, 4.0, 5.0]: # * 0.9
-            data = Variable(encoder_out_copy + latent_out_copy.unsqueeze(1), volatile=False)
+        for epsilon in [2, 3, 4, 5]: # * 0.9
+            data = Variable(latent_out_copy, volatile=False)
             data.requires_grad = True
 
             logit = cls_model(encoder_out=data)
@@ -136,21 +150,23 @@ def augmenting(args):
             cls_model.zero_grad()
             cls_loss.backward()
             data_grad = data.grad
-            data = data - epsilon * data_grad
+            data = data - ((epsilon * 0.8) * data_grad)
 
             with torch.no_grad():
                 with autocast():
                     decoder_out = aug_model.generate(src_input_ids=src_sequence, 
-                                                     src_attention_mask=src_att,
-                                                     z=data)
+                                                    src_attention_mask=src_att,
+                                                    z=data)
 
             # Augmenting
             augmented_output = aug_model.tokenizer.batch_decode(decoder_out, skip_special_tokens=True)
-            src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
-
+            aug_list[f'eps_{epsilon}'].extend(augmented_output)
+            
     result_dat = pd.DataFrame({
         'seq': seq_list,
-        'aug': aug_list,
-        'aug2': aug2_list
+        'aug_2': aug_list['eps_2'],
+        'aug_3': aug_list['eps_3'],
+        'aug_4': aug_list['eps_4'],
+        'aug_5': aug_list['eps_5'],
     })
     result_dat.to_csv('./result.csv', index=False)

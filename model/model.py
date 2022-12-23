@@ -85,16 +85,15 @@ class TransformerModel(nn.Module):
         encoder_out = self.encoder(input_ids=src_input_ids, 
                                    attention_mask=src_attention_mask)
         encoder_out = encoder_out['last_hidden_state']
-        encoder_out = encoder_out + self.position(src_input_ids)
-        encoder_out = encoder_out.transpose(0, 1)
-        latent_out, _ = self.gru(encoder_out)
-        latent_out = latent_out.mean(dim=0)
+        encoder_out = encoder_out + self.position(src_input_ids) # (batch_size, seq_len, d_hidden)
+        latent_out, _ = self.gru(encoder_out.transpose(0, 1)) # (seq_len, batch_size, d_hidden)
+        latent_out = latent_out.mean(dim=0) # (batch_size, d_hidden)
 
         # Decoding
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=latent_out,
-            encoder_attention_mask=src_attention_mask[:,0].unsqueeze(1)
+            encoder_hidden_states=(encoder_out + latent_out.unsqueeze(1)),
+            encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
 

@@ -82,8 +82,10 @@ if __name__=='__main__':
                         help="Sentences's minimum length; Default is 4")
     parser.add_argument('--src_max_len', default=200, type=int, 
                         help="Sentences's minimum length; Default is 200")
-    parser.add_argument('--num_epochs', default=5, type=int, 
-                        help='Training epochs; Default is 5')
+    parser.add_argument('--aug_num_epochs', default=10, type=int, 
+                        help='Augmenter training epochs; Default is 10')
+    parser.add_argument('--cls_num_epochs', default=10, type=int, 
+                        help='Classifier training epochs; Default is 10')
     parser.add_argument('--num_workers', default=8, type=int, 
                         help='Num CPU Workers; Default is 8')
     parser.add_argument('--num_grad_accumulate', default=5, type=int,
