@@ -92,7 +92,7 @@ class TransformerModel(nn.Module):
         # Decoding
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=(encoder_out + latent_out.unsqueeze(1)),
+            encoder_hidden_states=((encoder_out*0.3) + (latent_out.unsqueeze(1)*0.7)),
             encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
@@ -146,6 +146,7 @@ class ClassifierModel(nn.Module):
         out = self.dropout(F.gelu(self.linear1(encoder_out)))
         out = self.dropout(F.gelu(self.linear2(out)))
         out = self.linear3(out).mean(dim=1)
+        out = F.softmax(out, dim=1)
 
         return out
 

@@ -98,6 +98,7 @@ def augmenting(args):
 
     # 3) Model loading
     cudnn.benchmark = True
+    cls_criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps).to(device)
     aug_save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'aug_checkpoint.pth.tar')
     cls_save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'cls_checkpoint.pth.tar')
     aug_checkpoint = torch.load(aug_save_file_name)
@@ -128,13 +129,14 @@ def augmenting(args):
         # Input setting
         b_iter = input_to_device(batch_iter, device=device)
         src_sequence, src_att, src_seg, trg_label = b_iter
-    #     trg_label = torch.flip(trg_label, dims=[1])
-        trg_label = torch.full((len(trg_label), num_labels), 1 / num_labels).to(device)
+        trg_label = torch.flip(trg_label, dims=[1])
+        # trg_label = torch.full((len(trg_label), num_labels), 1 / num_labels).to(device)
 
         # Augmenter
         with torch.no_grad():
             decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
                                                                 src_attention_mask=src_att)
+        encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
         latent_out_copy = latent_out.clone().detach().requires_grad_(True)
         src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
         seq_list.extend(src_output)
@@ -142,7 +144,7 @@ def augmenting(args):
         aug_list['origin'].extend(aug_model.tokenizer.batch_decode(decoder_out.argmax(dim=2), skip_special_tokens=True))
 
         for epsilon in [2, 3, 4, 5]: # * 0.9
-            data = Variable(latent_out_copy, volatile=False)
+            data = Variable(encoder_out_copy+latent_out_copy.unsqueeze(1), volatile=False)
             data.requires_grad = True
 
             logit = cls_model(encoder_out=data)
@@ -161,6 +163,9 @@ def augmenting(args):
             # Augmenting
             augmented_output = aug_model.tokenizer.batch_decode(decoder_out, skip_special_tokens=True)
             aug_list[f'eps_{epsilon}'].extend(augmented_output)
+
+        if args.debuging_mode:
+            break
             
     result_dat = pd.DataFrame({
         'seq': seq_list,
