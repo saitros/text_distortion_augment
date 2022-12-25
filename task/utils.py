@@ -49,7 +49,7 @@ def data_load(args):
     if args.data_name == 'sst2':
         dataset = load_dataset("glue", args.data_name)
         train_dat = pd.DataFrame(dataset['train'])
-        valid_dat = pd.DataFrame(dataset['valid'])
+        valid_dat = pd.DataFrame(dataset['validation'])
         test_dat = pd.DataFrame(dataset['test'])
 
         src_list['train'] = train_dat['sentence'].tolist()
@@ -64,7 +64,7 @@ def data_load(args):
     if args.data_name == 'cola':
         dataset = load_dataset("glue", args.data_name)
         train_dat = pd.DataFrame(dataset['train'])
-        valid_dat = pd.DataFrame(dataset['valid'])
+        valid_dat = pd.DataFrame(dataset['validation'])
         test_dat = pd.DataFrame(dataset['test'])
 
         src_list['train'] = train_dat['sentence'].tolist()

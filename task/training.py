@@ -87,8 +87,9 @@ def training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    aug_model = TransformerModel(model_type=args.model_type,
-                                 isPreTrain=args.isPreTrain, dropout=args.dropout)
+    aug_model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len,
+                                 isPreTrain=args.isPreTrain, dropout=args.dropout,
+                                 encoder_out_ratio=args.encoder_out_ratio)
     cls_model = ClassifierModel(d_latent=aug_model.d_hidden, num_labels=num_labels, dropout=args.dropout)
     aug_model.to(device)
     cls_model.to(device)
@@ -171,7 +172,6 @@ def training(args):
             # Augmenter training
             decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
                                                                 src_attention_mask=src_att)
-            latent_out_copy = latent_out.clone().detach().requires_grad_(True)
             mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
 
             recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
@@ -240,7 +240,7 @@ def training(args):
             best_aug_val_loss = val_recon_loss
             best_aug_epoch = epoch
         else:
-            else_log = f'Still {best_epoch} epoch Loss({round(best_aug_val_loss.item(), 2)}) is better...'
+            else_log = f'Still {best_aug_epoch} epoch Loss({round(best_aug_val_loss.item(), 2)}) is better...'
             write_log(logger, else_log)
 
     for epoch in range(start_epoch + 1, args.cls_num_epochs + 1):
@@ -337,7 +337,7 @@ def training(args):
             best_cls_val_loss = val_cls_loss
             best_cls_epoch = epoch
         else:
-            else_log = f'Still {best_epoch} epoch Loss({round(best_cls_val_loss.item(), 2)}) is better...'
+            else_log = f'Still {best_cls_epoch} epoch Loss({round(best_cls_val_loss.item(), 2)}) is better...'
             write_log(logger, else_log)
 
     #===================================#

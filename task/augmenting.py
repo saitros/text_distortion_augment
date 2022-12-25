@@ -123,6 +123,8 @@ def augmenting(args):
     aug_list['eps_3'] = list()
     aug_list['eps_4'] = list()
     aug_list['eps_5'] = list()
+    aug_list['eps_6'] = list()
+    aug_list['eps_7'] = list()
 
     for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
@@ -143,7 +145,7 @@ def augmenting(args):
         
         aug_list['origin'].extend(aug_model.tokenizer.batch_decode(decoder_out.argmax(dim=2), skip_special_tokens=True))
 
-        for epsilon in [2, 3, 4, 5]: # * 0.9
+        for epsilon in [2, 3, 4, 5, 6, 7]: # * 0.9
             data = Variable(encoder_out_copy+latent_out_copy.unsqueeze(1), volatile=False)
             data.requires_grad = True
 
@@ -173,5 +175,7 @@ def augmenting(args):
         'aug_3': aug_list['eps_3'],
         'aug_4': aug_list['eps_4'],
         'aug_5': aug_list['eps_5'],
+        'aug_6': aug_list['eps_6'],
+        'aug_7': aug_list['eps_7']
     })
     result_dat.to_csv('./result.csv', index=False)

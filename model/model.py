@@ -14,8 +14,9 @@ from transformers import BertConfig, BertModel, BertForSequenceClassification
 from utils import return_model_name
 
 class TransformerModel(nn.Module):
-    def __init__(self, model_type: str = 'bart',
-                 isPreTrain: bool = True, dropout: float = 0.3):
+    def __init__(self, model_type: str = 'bart', src_max_len: int = 150,
+                 isPreTrain: bool = True, dropout: float = 0.3,
+                 encoder_out_ratio: float = 0.5):
         super().__init__()
 
         """
@@ -32,8 +33,15 @@ class TransformerModel(nn.Module):
             z (torch.Tensor): sampled latent vector
         """
         self.isPreTrain = isPreTrain
+        self.src_max_len = src_max_len
         self.dropout = nn.Dropout(dropout)
         self.model_type = model_type
+
+        # Ratio setting
+        assert encoder_out_ratio >= 0
+        assert encoder_out_ratio <= 1
+        self.encoder_out_ratio = encoder_out_ratio
+        self.latent_out_ratio = 1 - encoder_out_ratio
 
         # Token index & dimension
         model_name = return_model_name(self.model_type)
@@ -54,7 +62,6 @@ class TransformerModel(nn.Module):
 
         # Encoding
         self.position = PositionalEmbedding(d_model=self.d_hidden, max_len=360)
-        self.attention = AttentionScore(self.d_hidden, self.d_hidden)
         self.gru = nn.GRU(input_size=self.d_hidden, hidden_size=self.d_hidden, num_layers=1)
 
         # Linear Model Setting
@@ -92,7 +99,7 @@ class TransformerModel(nn.Module):
         # Decoding
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=((encoder_out*0.3) + (latent_out.unsqueeze(1)*0.7)),
+            encoder_hidden_states=((encoder_out*self.encoder_out_ratio) + (latent_out.unsqueeze(1)*self.latent_out_ratio)),
             encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
@@ -115,7 +122,7 @@ class TransformerModel(nn.Module):
         # Encoding
         inp_ = decoder_input_ids[:,0].unsqueeze(1)
 
-        for i in range(150): # Need to fix
+        for i in range(self.src_max_len): # Need to fix
             decoder_outputs = self.decoder(
                 input_ids=inp_,
                 encoder_hidden_states=z,
@@ -219,72 +226,3 @@ class PositionalEmbedding(nn.Module):
 
     def forward(self, x):
         return self.pe[:, :x.size(1)]
-
-class AttentionScore(nn.Module):
-    """
-    correlation_func = 1, sij = x1^Tx2
-    correlation_func = 2, sij = (Wx1)D(Wx2)
-    correlation_func = 3, sij = Relu(Wx1)DRelu(Wx2)
-    correlation_func = 4, sij = x1^TWx2
-    correlation_func = 5, sij = Relu(Wx1)DRelu(Wx2)
-    """
-
-    def __init__(self, input_size, hidden_size, correlation_func=1, do_similarity=False):
-        super(AttentionScore, self).__init__()
-        self.correlation_func = correlation_func
-        self.hidden_size = hidden_size
-
-        if correlation_func == 2 or correlation_func == 3:
-            self.linear = nn.Linear(input_size, hidden_size, bias=False)
-            if do_similarity:
-                self.diagonal = Parameter(torch.ones(1, 1, 1) / (hidden_size ** 0.5), requires_grad=False)
-            else:
-                self.diagonal = Parameter(torch.ones(1, 1, hidden_size), requires_grad=True)
-
-        if correlation_func == 4:
-            self.linear = nn.Linear(input_size, input_size, bias=False)
-
-        if correlation_func == 5:
-            self.linear = nn.Linear(input_size, hidden_size, bias=False)
-
-    def forward(self, x1, x2, x2_mask):
-        '''
-        Input:
-        x1: batch x word_num1 x dim
-        x2: batch x word_num2 x dim
-        Output:
-        scores: batch x word_num1 x word_num2
-        '''
-        # x1 = dropout(x1, p = dropout_p, training = self.training)
-        # x2 = dropout(x2, p = dropout_p, training = self.training)
-
-        x1_rep = x1
-        x2_rep = x2
-        batch = x1_rep.size(0)
-        word_num1 = x1_rep.size(1)
-        word_num2 = x2_rep.size(1)
-        dim = x1_rep.size(2)
-        if self.correlation_func == 2 or self.correlation_func == 3:
-            x1_rep = self.linear(x1_rep.contiguous().view(-1, dim)).view(batch, word_num1, self.hidden_size)  # Wx1
-            x2_rep = self.linear(x2_rep.contiguous().view(-1, dim)).view(batch, word_num2, self.hidden_size)  # Wx2
-            if self.correlation_func == 3:
-                x1_rep = F.relu(x1_rep)
-                x2_rep = F.relu(x2_rep)
-            x1_rep = x1_rep * self.diagonal.expand_as(x1_rep)
-            # x1_rep is (Wx1)D or Relu(Wx1)D
-            # x1_rep: batch x word_num1 x dim (corr=1) or hidden_size (corr=2,3)
-
-        if self.correlation_func == 4:
-            x2_rep = self.linear(x2_rep.contiguous().view(-1, dim)).view(batch, word_num2, dim)  # Wx2
-
-        if self.correlation_func == 5:
-            x1_rep = self.linear(x1_rep.contiguous().view(-1, dim)).view(batch, word_num1, self.hidden_size)  # Wx1
-            x2_rep = self.linear(x2_rep.contiguous().view(-1, dim)).view(batch, word_num2, self.hidden_size)  # Wx2
-            x1_rep = F.relu(x1_rep)
-            x2_rep = F.relu(x2_rep)
-        scores = x1_rep.bmm(x2_rep.transpose(1, 2))
-        empty_mask = x2_mask.eq(0).expand_as(scores)
-        scores.data.masked_fill_(empty_mask.data, -float('inf'))
-        # softmax
-        alpha_flat = F.softmax(scores, dim=-1)
-        return alpha_flat
