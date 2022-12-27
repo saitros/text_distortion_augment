@@ -29,7 +29,7 @@ from optimizer.scheduler import get_cosine_schedule_with_warmup
 from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
 from task.utils import input_to_device
 
-def training(args):
+def augmenter_training(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     #===================================#
@@ -228,7 +228,7 @@ def training(args):
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
         write_log(logger, 'Augmenter Validation MMD Loss: %3.3f' % val_mmd_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'aug_checkpoint03.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'aug_checkpoint_only_latent.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Checkpoint saving...')
             torch.save({
@@ -261,7 +261,7 @@ def training(args):
                 # Augmenter training
                 decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
                                                                  src_attention_mask=src_att)
-            encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
+            # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
             latent_out_copy = latent_out.clone().detach().requires_grad_(True)
 
             #===================================#
@@ -269,7 +269,7 @@ def training(args):
             #===================================#
 
             # Classifier training
-            logit = cls_model(encoder_out=(encoder_out_copy*0.5)+(latent_out_copy.unsqueeze(1)*0.5))
+            logit = cls_model(encoder_out=latent_out_copy)
             cls_loss = cls_criterion(logit, trg_label)
             cls_loss.backward()
             if args.clip_grad_norm > 0:
@@ -311,7 +311,7 @@ def training(args):
                                                                  src_attention_mask=src_att)
 
             with torch.no_grad():
-                logit = cls_model(encoder_out=(encoder_out*0.3)+(latent_out.unsqueeze(1)*0.7))
+                logit = cls_model(encoder_out=latent_out)
                 cls_loss = cls_criterion(logit, trg_label)
 
             val_cls_loss += cls_loss
@@ -325,7 +325,7 @@ def training(args):
         write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'cls_checkpoint03.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'cls_checkpoint_only_latent.pth.tar')
         if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Checkpoint saving...')
             torch.save({

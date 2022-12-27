@@ -61,8 +61,8 @@ class TransformerModel(nn.Module):
         self.shared = self.basemodel.shared
 
         # Encoding
-        self.position = PositionalEmbedding(d_model=self.d_hidden, max_len=360)
-        self.gru = nn.GRU(input_size=self.d_hidden, hidden_size=self.d_hidden, num_layers=1)
+        self.position = PositionalEmbedding(d_model=self.d_hidden, max_len=self.src_max_len)
+        self.gru = nn.GRU(input_size=self.d_hidden, hidden_size=self.d_hidden, num_layers=3, batch_first=True)
 
         # Linear Model Setting
         self.decoder_linear = nn.Linear(self.d_hidden, self.d_embedding)
@@ -93,14 +93,14 @@ class TransformerModel(nn.Module):
                                    attention_mask=src_attention_mask)
         encoder_out = encoder_out['last_hidden_state']
         encoder_out = encoder_out + self.position(src_input_ids) # (batch_size, seq_len, d_hidden)
-        latent_out, _ = self.gru(encoder_out.transpose(0, 1)) # (seq_len, batch_size, d_hidden)
-        latent_out = latent_out.mean(dim=0) # (batch_size, d_hidden)
+        latent_out, _ = self.gru(encoder_out) # (batch_size, seq_len, d_hidden)
+        latent_out = latent_out.mean(dim=1) # (batch_size, d_hidden)
 
         # Decoding
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=((encoder_out*self.encoder_out_ratio) + (latent_out.unsqueeze(1)*self.latent_out_ratio)),
-            encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
+            encoder_hidden_states=latent_out,
+            encoder_attention_mask=src_attention_mask[:,0].unsqueeze(1)
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
 
@@ -150,9 +150,9 @@ class ClassifierModel(nn.Module):
 
     def forward(self, encoder_out):
         # encoder_out = encoder_out.mean(dim=1)
-        out = self.dropout(F.gelu(self.linear1(encoder_out)))
-        out = self.dropout(F.gelu(self.linear2(out)))
-        out = self.linear3(out).mean(dim=1)
+        out = self.dropout(self.leaky_relu(self.linear1(encoder_out)))
+        out = self.dropout(self.leaky_relu(self.linear2(out)))
+        out = self.linear3(out)#.mean(dim=1)
         out = F.softmax(out, dim=1)
 
         return out
