@@ -125,6 +125,9 @@ def augmenting(args):
     aug_list['eps_5'] = list()
     aug_list['eps_6'] = list()
     aug_list['eps_7'] = list()
+    aug_list['eps_8'] = list()
+    aug_list['eps_9'] = list()
+    aug_list['eps_10'] = list()
 
     for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
@@ -138,15 +141,13 @@ def augmenting(args):
         with torch.no_grad():
             decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
                                                                 src_attention_mask=src_att)
-        encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-        latent_out_copy = latent_out.clone().detach().requires_grad_(True)
         src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
         seq_list.extend(src_output)
         
         aug_list['origin'].extend(aug_model.tokenizer.batch_decode(decoder_out.argmax(dim=2), skip_special_tokens=True))
 
-        for epsilon in [2, 3, 4, 5, 6, 7]: # * 0.9
-            data = Variable(encoder_out_copy+latent_out_copy.unsqueeze(1), volatile=False)
+        for epsilon in [2, 3, 4, 5, 6, 7, 8, 9]: # * 0.9
+            data = Variable(latent_out.clone(), volatile=False)
             data.requires_grad = True
 
             logit = cls_model(encoder_out=data)
@@ -171,12 +172,16 @@ def augmenting(args):
             
     result_dat = pd.DataFrame({
         'seq': seq_list,
+        'aug_1': aug_list['origin'],
         'aug_2': aug_list['eps_2'],
         'aug_3': aug_list['eps_3'],
         'aug_4': aug_list['eps_4'],
         'aug_5': aug_list['eps_5'],
         'aug_6': aug_list['eps_6'],
-        'aug_7': aug_list['eps_7']
+        'aug_7': aug_list['eps_7'],
+        'aug_8': aug_list['eps_8'],
+        'aug_9': aug_list['eps_9'],
+        'aug_10': aug_list['eps_10']
     })
     result_dat.to_csv('./augmenting_result.csv', index=False)
 

@@ -69,6 +69,14 @@ class TransformerModel(nn.Module):
         self.decoder_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
         self.decoder_augmenter = nn.Linear(self.d_embedding, self.vocab_num)
 
+        # Classifier
+        self.classifier1 = nn.Linear(self.d_hidden, self.d_embedding)
+        self.classifier1_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
+        self.classifier2 = nn.Linear(self.d_embedding, self.d_embedding)
+        self.classifier2_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
+        self.classifier3 = nn.Linear(self.d_embedding, 2)
+        self.leaky_relu = nn.LeakyReLU(0.1)
+
         # Tokenizer Setting
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.pad_idx = self.tokenizer.pad_token_id
@@ -79,28 +87,31 @@ class TransformerModel(nn.Module):
             self.bos_idx = self.tokenizer.bos_token_id
             self.eos_idx = self.tokenizer.eos_token_id
 
-    def forward(self, src_input_ids, src_attention_mask):
+    def encode(self, src_input_ids, src_attention_mask):
+        # Encoding
+        encoder_out = self.encoder(input_ids=src_input_ids, 
+                                   attention_mask=src_attention_mask)
+        encoder_out = encoder_out['last_hidden_state']
+        latent_out = encoder_out + self.position(src_input_ids) # (batch_size, seq_len, d_hidden)
+        latent_out, _ = self.gru(latent_out) # (batch_size, seq_len, d_hidden)
+        latent_out = latent_out.sum(dim=1) # (batch_size, d_hidden)
 
-        decoder_input_ids = None
+        return encoder_out, latent_out
+
+    def reconstruct(self, src_input_ids, src_attention_mask, encoder_out, latent_out):
+
+        # decoder_input_ids = None
         # decoder_attention_mask = None
 
         decoder_input_ids = shift_tokens_right(
             src_input_ids, self.model_config.pad_token_id, self.model_config.decoder_start_token_id
         )
 
-        # Encoding
-        encoder_out = self.encoder(input_ids=src_input_ids, 
-                                   attention_mask=src_attention_mask)
-        encoder_out = encoder_out['last_hidden_state']
-        encoder_out = encoder_out + self.position(src_input_ids) # (batch_size, seq_len, d_hidden)
-        latent_out, _ = self.gru(encoder_out) # (batch_size, seq_len, d_hidden)
-        latent_out = latent_out.mean(dim=1) # (batch_size, d_hidden)
-
         # Decoding
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=latent_out,
-            encoder_attention_mask=src_attention_mask[:,0].unsqueeze(1)
+            encoder_hidden_states=encoder_out+latent_out.unsqueeze(1),
+            encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
 
@@ -108,12 +119,20 @@ class TransformerModel(nn.Module):
         decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
         decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
 
-        return decoder_out, encoder_out, latent_out
+        return decoder_out
 
-    def generate(self, src_input_ids, src_attention_mask, z):
+    def classify(self, latent_out):
+
+        decoder_out = self.classifier1_norm(self.dropout(self.leaky_relu(self.classifier1(latent_out))))
+        decoder_out = self.classifier2_norm(self.dropout(self.leaky_relu(self.classifier2(decoder_out))))
+        decoder_out = self.classifier3(decoder_out)
+
+        return decoder_out
+
+    def generate(self, src_input_ids, src_attention_mask, encoder_out, latent_out):
 
         decoder_input_ids = None
-        decoder_attention_mask = None
+        # decoder_attention_mask = None
 
         decoder_input_ids = shift_tokens_right(
             src_input_ids, self.model_config.pad_token_id, self.model_config.decoder_start_token_id
@@ -125,11 +144,11 @@ class TransformerModel(nn.Module):
         for i in range(self.src_max_len): # Need to fix
             decoder_outputs = self.decoder(
                 input_ids=inp_,
-                encoder_hidden_states=z,
+                encoder_hidden_states=encoder_out+latent_out.unsqueeze(1),
                 encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
             )
             decoder_outputs = decoder_outputs['last_hidden_state']
-
+ 
             # Decoding
             decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
             decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
@@ -146,14 +165,14 @@ class ClassifierModel(nn.Module):
         self.linear2 = nn.Linear(512, 256)
         self.linear3 = nn.Linear(256, num_labels)
         self.dropout = nn.Dropout(dropout)
-        self.leaky_relu = nn.LeakyReLU(0.2)
+        self.leaky_relu = nn.LeakyReLU(0.1)
 
     def forward(self, encoder_out):
         # encoder_out = encoder_out.mean(dim=1)
         out = self.dropout(self.leaky_relu(self.linear1(encoder_out)))
         out = self.dropout(self.leaky_relu(self.linear2(out)))
         out = self.linear3(out)#.mean(dim=1)
-        out = F.softmax(out, dim=1)
+        # out = F.softmax(out, dim=1)
 
         return out
 
