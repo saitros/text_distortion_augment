@@ -63,6 +63,14 @@ class TransformerModel(nn.Module):
         self.decoder_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
         self.decoder_augmenter = nn.Linear(self.d_embedding, self.vocab_num)
 
+        # Classifier
+        self.classifier1 = nn.Linear(self.d_hidden, self.d_embedding)
+        self.classifier1_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
+        self.classifier2 = nn.Linear(self.d_embedding, self.d_embedding)
+        self.classifier2_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
+        self.classifier3 = nn.Linear(self.d_embedding, 2)
+        self.leaky_relu = nn.LeakyReLU(0.1)
+
         # Tokenizer Setting
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.pad_idx = self.tokenizer.pad_token_id
@@ -168,7 +176,7 @@ class ClassifierModel(nn.Module):
         self.linear2 = nn.Linear(512, 256)
         self.linear3 = nn.Linear(256, num_labels)
         self.dropout = nn.Dropout(dropout)
-        self.leaky_relu = nn.LeakyReLU(0.2)
+        self.leaky_relu = nn.LeakyReLU(0.1)
 
     def forward(self, hidden_state):
         # encoder_out = encoder_out.mean(dim=1)
