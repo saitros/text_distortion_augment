@@ -7,16 +7,14 @@ from torch.cuda.amp import autocast
 from torch.nn import functional as F
 # Import Huggingface
 from transformers import PretrainedConfig, AutoModel, AutoTokenizer
-from transformers import AlbertConfig, AlbertForSequenceClassification
-from transformers import DebertaConfig, DebertaForSequenceClassification
-from transformers import BertConfig, BertModel, BertForSequenceClassification
 # Import Custom Modules
 from utils import return_model_name
+from model.utils import model_setting
 
 class TransformerModel(nn.Module):
     def __init__(self, model_type: str = 'bart', src_max_len: int = 150,
-                 isPreTrain: bool = True, dropout: float = 0.3,
-                 encoder_out_ratio: float = 0.5):
+                 isPreTrain: bool = True, num_labels: int = 2,
+                 dropout: float = 0.3, encoder_out_ratio: float = 0.5):
         super().__init__()
 
         """
@@ -43,28 +41,24 @@ class TransformerModel(nn.Module):
         self.encoder_out_ratio = encoder_out_ratio
         self.latent_out_ratio = 1 - encoder_out_ratio
 
-        # Token index & dimension
+        # Model setting
         model_name = return_model_name(self.model_type)
-        self.model_config = PretrainedConfig.from_pretrained(model_name)
+        encoder, decoder, model_config = model_setting(model_name, self.isPreTrain)
 
-        if self.model_type == 'bert':
-            self.d_hidden = self.model_config.hidden_size
-        else:
-            self.d_hidden = self.model_config.d_model
+        self.model_config = model_config
+        self.d_hidden = model_config.d_model
         self.d_embedding = int(self.d_hidden / 2)
-        self.vocab_num = self.model_config.vocab_size
+        self.num_labels = num_labels
+        self.vocab_num = model_config.vocab_size
 
-        # Pre-trained Model Setting
-        self.basemodel = AutoModel.from_pretrained(model_name)
-        self.encoder = self.basemodel.encoder
-        self.decoder = self.basemodel.decoder
-        self.shared = self.basemodel.shared
+        self.encoder = encoder
+        self.decoder = decoder
 
         # Encoding
         self.position = PositionalEmbedding(d_model=self.d_hidden, max_len=self.src_max_len)
         self.gru = nn.GRU(input_size=self.d_hidden, hidden_size=self.d_hidden, num_layers=3, batch_first=True)
 
-        # Linear Model Setting
+        # Augmenter Model Setting
         self.decoder_linear = nn.Linear(self.d_hidden, self.d_embedding)
         self.decoder_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
         self.decoder_augmenter = nn.Linear(self.d_embedding, self.vocab_num)
@@ -72,6 +66,7 @@ class TransformerModel(nn.Module):
         # Tokenizer Setting
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.pad_idx = self.tokenizer.pad_token_id
+        self.decoder_start_token_id = self.model_config.decoder_start_token_id
         if self.model_type == 'bert':
             self.bos_idx = self.tokenizer.cls_token_id
             self.eos_idx = self.tokenizer.sep_token_id
@@ -79,64 +74,91 @@ class TransformerModel(nn.Module):
             self.bos_idx = self.tokenizer.bos_token_id
             self.eos_idx = self.tokenizer.eos_token_id
 
-    def forward(self, src_input_ids, src_attention_mask):
-
-        decoder_input_ids = None
-        # decoder_attention_mask = None
-
-        decoder_input_ids = shift_tokens_right(
-            src_input_ids, self.model_config.pad_token_id, self.model_config.decoder_start_token_id
-        )
-
-        # Encoding
-        encoder_out = self.encoder(input_ids=src_input_ids, 
-                                   attention_mask=src_attention_mask)
+    def encode(self, input_ids, attention_mask):
+        encoder_out = self.encoder(input_ids=input_ids, 
+                                   attention_mask=attention_mask)
         encoder_out = encoder_out['last_hidden_state']
-        encoder_out = encoder_out + self.position(src_input_ids) # (batch_size, seq_len, d_hidden)
-        latent_out, _ = self.gru(encoder_out) # (batch_size, seq_len, d_hidden)
-        latent_out = latent_out.mean(dim=1) # (batch_size, d_hidden)
 
-        # Decoding
+        return encoder_out
+
+    def latent_encode(self, input_ids, encoder_out):
+        latent_out = encoder_out + self.position(input_ids) # (batch_size, seq_len, d_hidden)
+        latent_out, _ = self.gru(encoder_out) # (batch_size, seq_len, d_hidden)
+        latent_out = latent_out.max(dim=1)[0] # (batch_size, d_hidden)
+
+        return latent_out
+
+    def decode(self, input_ids, attention_mask, encoder_out, latent_out):
+
+        # decoder_input_ids = shift_tokens_right(
+        #     input_ids, self.pad_idx, self.decoder_start_token_id
+        # )
+        decoder_input_ids = input_ids
+
+        if self.encoder_out_ratio == 0:
+            encoder_hidden_states = latent_out
+            encoder_attention_mask = attention_mask[:,0].unsqueeze(1)
+        elif self.latent_out_ratio == 0:
+            encoder_hidden_states = encoder_out.max(dim=1)[0]
+            encoder_attention_mask = attention_mask
+        else:
+            encoder_hidden_states = \
+            (self.encoder_out_ratio * encoder_out) + (self.latent_out_ratio * latent_out.unsqueeze(1))
+            encoder_attention_mask = attention_mask
+        
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=latent_out,
-            encoder_attention_mask=src_attention_mask[:,0].unsqueeze(1)
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
 
-        # Decoding
-        decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
+        return decoder_outputs
+
+    def reconstruct(self, decoder_out):
+
+        decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_out)))
         decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
 
-        return decoder_out, encoder_out, latent_out
+        return decoder_out
 
-    def generate(self, src_input_ids, src_attention_mask, z):
-
-        decoder_input_ids = None
-        decoder_attention_mask = None
-
-        decoder_input_ids = shift_tokens_right(
-            src_input_ids, self.model_config.pad_token_id, self.model_config.decoder_start_token_id
-        )
-
+    def forward(self, src_input_ids, src_attention_mask):
         # Encoding
-        inp_ = decoder_input_ids[:,0].unsqueeze(1)
+        encoder_out = self.encode(input_ids=src_input_ids, attention_mask=src_attention_mask)
 
-        for i in range(self.src_max_len): # Need to fix
-            decoder_outputs = self.decoder(
-                input_ids=inp_,
-                encoder_hidden_states=z,
-                encoder_attention_mask=src_attention_mask#[:,0].unsqueeze(1)
-            )
-            decoder_outputs = decoder_outputs['last_hidden_state']
+        # Latent Encoding
+        latent_out = self.latent_encode(input_ids=src_input_ids, encoder_out=encoder_out)        
 
-            # Decoding
-            decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
-            decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
-            _, next_word = torch.max(decoder_out[:,-1], dim=1)
-            inp_ = torch.cat([inp_, next_word.unsqueeze(1)], dim=1)
+        # Decoding
+        decoder_out = self.decode(input_ids=src_input_ids,
+                                  attention_mask=src_attention_mask,
+                                  encoder_out=encoder_out,
+                                  latent_out=latent_out)
 
-        return inp_
+        # Reconstruct
+        recon_out = self.reconstruct(decoder_out=decoder_out)
+
+        return recon_out, encoder_out, latent_out
+
+    def generate(self, src_input_ids, src_attention_mask, latent_z):
+
+        if self.encoder_out_ratio == 0:
+            encoder_attention_mask = src_attention_mask[:,0].unsqueeze(1)
+        else:
+            encoder_attention_mask = src_attention_mask
+
+        # Decoding
+        decoder_outputs = self.decoder(
+            input_ids=src_input_ids,
+            encoder_hidden_states=latent_z,
+            encoder_attention_mask=encoder_attention_mask
+        )
+        decoder_outputs = decoder_outputs['last_hidden_state']
+
+        # Reconstruct
+        recon_out = self.reconstruct(decoder_out=decoder_outputs)
+
+        return recon_out
 
 class ClassifierModel(nn.Module):
     def __init__(self, d_latent, num_labels: int = 2, dropout: float = 0.3):
@@ -148,12 +170,11 @@ class ClassifierModel(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.leaky_relu = nn.LeakyReLU(0.2)
 
-    def forward(self, encoder_out):
+    def forward(self, hidden_state):
         # encoder_out = encoder_out.mean(dim=1)
-        out = self.dropout(self.leaky_relu(self.linear1(encoder_out)))
+        out = self.dropout(self.leaky_relu(self.linear1(hidden_state)))
         out = self.dropout(self.leaky_relu(self.linear2(out)))
-        out = self.linear3(out)#.mean(dim=1)
-        out = F.softmax(out, dim=1)
+        out = self.linear3(out).max(dim=1)[0]
 
         return out
 

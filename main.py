@@ -61,6 +61,8 @@ if __name__=='__main__':
                         help='Augmentation model type; Default is BERT')
     parser.add_argument('--encoder_out_ratio', default=0.3, type=float,
                         help='')
+    parser.add_argument('--latent_mmd_loss', default=False, type=str2bool,
+                        help='')
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']

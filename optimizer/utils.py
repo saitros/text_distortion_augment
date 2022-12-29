@@ -30,7 +30,12 @@ def optimizer_select(optimizer_model, model, lr):
         raise Exception("Choose optimizer in ['AdamW', 'Adam', 'SGD', 'Ralamb']")
     return optimizer
 
-def shceduler_select(scheduler_model, optimizer, dataloader_len, args):
+def shceduler_select(phase, scheduler_model, optimizer, dataloader_len, args):
+
+    if phase == 'cls':
+        num_epochs = args.cls_num_epochs
+    elif phase == 'aug':
+        num_epochs = args.aug_num_epochs
 
     # Scheduler setting
     if scheduler_model == 'constant':
@@ -38,7 +43,7 @@ def shceduler_select(scheduler_model, optimizer, dataloader_len, args):
     elif scheduler_model == 'warmup':
         scheduler = WarmupLinearSchedule(optimizer, 
                                         warmup_steps=int(dataloader_len*args.n_warmup_epochs), 
-                                        t_total=dataloader_len*args.aug_num_epochs)
+                                        t_total=dataloader_len*num_epochs)
     elif scheduler_model == 'reduce_train':
         scheduler = ReduceLROnPlateau(optimizer, 'min', patience=int(dataloader_len*1.5),
                                       factor=0.5)

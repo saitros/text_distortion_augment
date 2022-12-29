@@ -269,7 +269,7 @@ def training(args):
             #===================================#
 
             # Classifier training
-            logit = cls_model(encoder_out=(encoder_out_copy*0.5)+(latent_out_copy.unsqueeze(1)*0.5))
+            logit = cls_model(encoder_out=(encoder_out_copy*0.5)+(latent_out_copy.unsqueeze(1)*0.))
             cls_loss = cls_criterion(logit, trg_label)
             cls_loss.backward()
             if args.clip_grad_norm > 0:
