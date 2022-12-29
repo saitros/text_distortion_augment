@@ -65,9 +65,7 @@ class TransformerModel(nn.Module):
 
         # Classifier
         self.classifier1 = nn.Linear(self.d_hidden, self.d_embedding)
-        self.classifier1_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
         self.classifier2 = nn.Linear(self.d_embedding, self.d_embedding)
-        self.classifier2_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
         self.classifier3 = nn.Linear(self.d_embedding, 2)
         self.leaky_relu = nn.LeakyReLU(0.1)
 
@@ -96,27 +94,21 @@ class TransformerModel(nn.Module):
 
         return latent_out
 
-    def decode(self, input_ids, attention_mask, encoder_out, latent_out):
+    def decode(self, input_ids, attention_mask, hidden_states):
 
-        # decoder_input_ids = shift_tokens_right(
-        #     input_ids, self.pad_idx, self.decoder_start_token_id
-        # )
-        decoder_input_ids = input_ids
+        decoder_input_ids = shift_tokens_right(
+            input_ids, self.pad_idx, self.decoder_start_token_id
+        )
+        # decoder_input_ids = input_ids
 
         if self.encoder_out_ratio == 0:
-            encoder_hidden_states = latent_out
             encoder_attention_mask = attention_mask[:,0].unsqueeze(1)
-        elif self.latent_out_ratio == 0:
-            encoder_hidden_states = encoder_out.max(dim=1)[0]
-            encoder_attention_mask = attention_mask
         else:
-            encoder_hidden_states = \
-            (self.encoder_out_ratio * encoder_out) + (self.latent_out_ratio * latent_out.unsqueeze(1))
             encoder_attention_mask = attention_mask
         
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=encoder_hidden_states,
+            encoder_hidden_states=hidden_states,
             encoder_attention_mask=encoder_attention_mask
         )
         decoder_outputs = decoder_outputs['last_hidden_state']
@@ -130,23 +122,28 @@ class TransformerModel(nn.Module):
 
         return decoder_out
 
-    def forward(self, src_input_ids, src_attention_mask):
-        # Encoding
-        encoder_out = self.encode(input_ids=src_input_ids, attention_mask=src_attention_mask)
+    def classify(self, hidden_states):
 
-        # Latent Encoding
-        latent_out = self.latent_encode(input_ids=src_input_ids, encoder_out=encoder_out)        
+        if self.encoder_out_ratio != 0:
+            hidden_states = hidden_states.max(dim=1)[0]
+
+        classifier_out = self.dropout(self.leaky_relu(self.classifier1(hidden_states)))
+        classifier_out = self.dropout(self.leaky_relu(self.classifier2(classifier_out)))
+        classifier_out = self.classifier3(classifier_out)
+
+        return classifier_out
+
+    def forward(self, input_ids, attention_mask, hidden_states):
 
         # Decoding
-        decoder_out = self.decode(input_ids=src_input_ids,
-                                  attention_mask=src_attention_mask,
-                                  encoder_out=encoder_out,
-                                  latent_out=latent_out)
+        decoder_out = self.decode(input_ids=input_ids,
+                                  attention_mask=attention_mask,
+                                  hidden_states=hidden_states)
 
         # Reconstruct
         recon_out = self.reconstruct(decoder_out=decoder_out)
 
-        return recon_out, encoder_out, latent_out
+        return recon_out
 
     def generate(self, src_input_ids, src_attention_mask, latent_z):
 
@@ -155,9 +152,13 @@ class TransformerModel(nn.Module):
         else:
             encoder_attention_mask = src_attention_mask
 
+        decoder_input_ids = shift_tokens_right(
+            src_input_ids, self.pad_idx, self.decoder_start_token_id
+        )
+
         # Decoding
         decoder_outputs = self.decoder(
-            input_ids=src_input_ids,
+            input_ids=decoder_input_ids,
             encoder_hidden_states=latent_z,
             encoder_attention_mask=encoder_attention_mask
         )

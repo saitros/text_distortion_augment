@@ -170,9 +170,33 @@ def augmenter_training(args):
             src_sequence, src_att, src_seg, trg_label = b_iter
 
             #===================================#
-            #=======Classifier Training=========#
+            #=============Encoding==============#
             #===================================#
-            recon_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, src_attention_mask=src_att)
+            encoder_out = aug_model.encode(input_ids=src_sequence, attention_mask=src_att)
+            latent_out = aug_model.latent_encode(input_ids=src_sequence, encoder_out=encoder_out)
+
+            #===================================#
+            #=============Classify==============#
+            #===================================#
+
+            if aug_model.encoder_out_ratio == 0:
+                hidden_states = latent_out
+            elif aug_model.latent_out_ratio == 0:
+                hidden_states = encoder_out.max(dim=1)[0]
+            else:
+                hidden_states = \
+                (aug_model.encoder_out_ratio * encoder_out) + (aug_model.latent_out_ratio * latent_out.unsqueeze(1))
+
+            classifier_out = aug_model.classify(hidden_states=hidden_states)
+
+            # Classifier Loss
+            cls_loss = cls_criterion(classifier_out, trg_label)
+
+            #===================================#
+            #============Reconstruct============#
+            #===================================#
+            recon_out = aug_model(input_ids=src_sequence, attention_mask=src_att, 
+                                  hidden_states=hidden_states)
 
             # Reconstruction Loss
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
@@ -182,49 +206,20 @@ def augmenter_training(args):
             else:
                 mmd_loss = torch.tensor(0.0).to(device)
 
-            aug_loss = mmd_loss + recon_loss
+            aug_loss = mmd_loss + recon_loss + cls_loss
             aug_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(aug_model.parameters(), args.clip_grad_norm)
             aug_optimizer.step()
             aug_scheduler.step()
 
-            #===================================#
-            #=======Classifier Training=========#
-            #===================================#
-
-            cls_optimizer.zero_grad(set_to_none=True)
-
-            if aug_model.encoder_out_ratio == 0:
-                latent_out_copy = latent_out.clone().detach().requires_grad_(True)
-                hidden_state = latent_out_copy
-            elif aug_model.latent_out_ratio == 0:
-                encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-                hidden_state = encoder_out_copy.max(dim=1)[0]
-            else:
-                encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-                latent_out_copy = latent_out.clone().detach().requires_grad_(True)
-                hidden_state = \
-                (aug_model.encoder_out_ratio * encoder_out_copy) + (aug_model.latent_out_ratio * latent_out_copy.unsqueeze(1))
-                hidden_state_copy = hidden_state.clone().detach().requires_grad_(True)
-
-            classifier_out = cls_model(hidden_state=hidden_state_copy)
-            cls_loss = cls_criterion(classifier_out, trg_label)
-
-            # Total Loss Backwar
-            cls_loss.backward()
-            if args.clip_grad_norm > 0:
-                clip_grad_norm_(cls_model.parameters(), args.clip_grad_norm)
-            cls_optimizer.step()
-            cls_scheduler.step()
-
             if args.debuging_mode:
                 break
 
             # Print loss value only training
             if i == 0 or i % args.print_freq == 0 or i == len(dataloader_dict['train'])-1:
-                iter_log = "[Epoch:%03d][%03d/%03d] train_cls_loss:%03.2f | train_recon_loss:%03.2f | train_mmd_loss:%03.2f | aug_learning_rate:%1.6f | cls_learning_rate:%1.6f |spend_time:%02.2fmin" % \
-                    (epoch, i, len(dataloader_dict['train'])-1, cls_loss.item(), recon_loss.item(), mmd_loss.item(), aug_optimizer.param_groups[0]['lr'], cls_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                iter_log = "[Epoch:%03d][%03d/%03d] train_cls_loss:%03.2f | train_recon_loss:%03.2f | train_mmd_loss:%03.2f | learning_rate:%1.6f |spend_time:%02.2fmin" % \
+                    (epoch, i, len(dataloader_dict['train'])-1, cls_loss.item(), recon_loss.item(), mmd_loss.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                 write_log(logger, iter_log)
 
         #===================================#
@@ -235,14 +230,11 @@ def augmenter_training(args):
         # Validation 
         aug_model.eval()
         cls_model.eval()
-        cls_model.eval()
 
         val_cls_loss = 0
         val_acc = 0
         val_mmd_loss = 0
         val_recon_loss = 0
-        val_cls_loss = 0
-        val_acc = 0
 
         for batch_iter in tqdm(dataloader_dict['valid'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}'):
 
@@ -250,17 +242,20 @@ def augmenter_training(args):
             src_sequence, src_att, src_seg, trg_label = b_iter
         
             with torch.no_grad():
-                recon_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, src_attention_mask=src_att)
+                encoder_out = aug_model.encode(input_ids=src_sequence, attention_mask=src_att)
+                latent_out = aug_model.latent_encode(input_ids=src_sequence, encoder_out=encoder_out)
 
                 if aug_model.encoder_out_ratio == 0:
-                    hidden_state = latent_out
+                    hidden_states = latent_out
                 elif aug_model.latent_out_ratio == 0:
-                    hidden_state = encoder_out.max(dim=1)[0]
+                    hidden_states = encoder_out.max(dim=1)[0]
                 else:
-                    hidden_state = \
+                    hidden_states = \
                     (aug_model.encoder_out_ratio * encoder_out) + (aug_model.latent_out_ratio * latent_out.unsqueeze(1))
 
-                classifier_out = cls_model(hidden_state=hidden_state)
+                classifier_out = aug_model.classify(hidden_states=hidden_states)
+                recon_out = aug_model(input_ids=src_sequence, attention_mask=src_att, 
+                                      hidden_states=hidden_states)
 
                 # Classifier Loss
                 cls_loss = cls_criterion(classifier_out, trg_label)
@@ -295,12 +290,13 @@ def augmenter_training(args):
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Augmenter Checkpoint saving...')
             torch.save({
-                'aug_model': aug_model.state_dict()
+                'aug_model': aug_model.state_dict(),
+                'cls_model': cls_model.state_dict()
             }, save_file_name)
             best_aug_val_loss = val_recon_loss
             best_aug_epoch = epoch
         else:
-            else_log = f'[AUG]Still {best_aug_epoch} epoch Loss({round(best_aug_val_loss.item(), 2)}) is better...'
+            else_log = f'Still {best_aug_epoch} epoch Loss({round(best_aug_val_loss.item(), 2)}) is better...'
             write_log(logger, else_log)
 
         #===================================#
@@ -322,36 +318,40 @@ def augmenter_training(args):
             trg_label = torch.flip(trg_label, dims=[1]).to(device)
 
             with torch.no_grad():
-                recon_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, src_attention_mask=src_att)
-
-            origin_output = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
+                encoder_out = aug_model.encode(input_ids=src_sequence, attention_mask=src_att)
+                latent_out = aug_model.latent_encode(input_ids=src_sequence, encoder_out=encoder_out)
 
             # Latent Encoding
             if aug_model.encoder_out_ratio == 0:
                 latent_out_copy = latent_out.clone().detach().requires_grad_(True)
-                hidden_state = latent_out_copy
+                hidden_states = latent_out_copy
             elif aug_model.latent_out_ratio == 0:
                 encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-                hidden_state = encoder_out_copy.max(dim=1)[0]
+                hidden_states = encoder_out_copy.max(dim=1)[0]
             else:
                 encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
                 latent_out_copy = latent_out.clone().detach().requires_grad_(True)
-                hidden_state = \
+                hidden_states = \
                 (aug_model.encoder_out_ratio * encoder_out_copy) + (aug_model.latent_out_ratio * latent_out_copy.unsqueeze(1))
-                hidden_state_copy = hidden_state.clone().detach().requires_grad_(True)
+                hidden_states_copy = hidden_states.clone().detach().requires_grad_(True)
 
-            classifier_out = cls_model(hidden_state=hidden_state_copy)
+            with torch.no_grad():
+                recon_out = aug_model(input_ids=src_sequence, attention_mask=src_att, 
+                                    hidden_states=hidden_states)
+                origin_output = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
+
+            classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
             cls_loss = cls_criterion(classifier_out, trg_label)
-            cls_model.zero_grad()
+            aug_model.zero_grad()
             cls_loss.backward()
-            hidden_state_copy_grad = hidden_state_copy.grad.data
+            hidden_states_copy_grad = hidden_states_copy.grad.data
 
             for epsilon in [2, 5, 8]:
-                hidden_state_copy = hidden_state - ((epsilon * 3) * hidden_state_copy_grad)
+                hidden_states_copy = hidden_states_copy - ((epsilon * 3) * hidden_states_copy_grad)
 
                 with torch.no_grad():
                     recon_out = aug_model.generate(src_input_ids=src_sequence, src_attention_mask=src_att,
-                                                   latent_z=hidden_state_copy)
+                                                   latent_z=hidden_states_copy)
                 # Augmenting
                 eps_dict[f'eps_{epsilon}'] = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
 
