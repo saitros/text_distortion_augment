@@ -324,10 +324,10 @@ def augmenter_training(args):
             # Latent Encoding
             if aug_model.encoder_out_ratio == 0:
                 latent_out_copy = latent_out.clone().detach().requires_grad_(True)
-                hidden_states = latent_out_copy
+                hidden_states_copy = latent_out_copy
             elif aug_model.latent_out_ratio == 0:
                 encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-                hidden_states = encoder_out_copy.max(dim=1)[0]
+                hidden_states_copy = encoder_out_copy.max(dim=1)[0]
             else:
                 encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
                 latent_out_copy = latent_out.clone().detach().requires_grad_(True)
@@ -337,7 +337,7 @@ def augmenter_training(args):
 
             with torch.no_grad():
                 recon_out = aug_model(input_ids=src_sequence, attention_mask=src_att, 
-                                    hidden_states=hidden_states)
+                                    hidden_states=hidden_states_copy)
                 origin_output = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
 
             classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
