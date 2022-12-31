@@ -29,7 +29,7 @@ from optimizer.scheduler import get_cosine_schedule_with_warmup
 from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
 from task.utils import input_to_device
 
-def augmenter_training(args):
+def augmenter_training2(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     #===================================#
@@ -195,7 +195,7 @@ def augmenter_training(args):
             cls_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(aug_model.parameters(), args.clip_grad_norm)
-            cls_optimizer.step()
+            aug_optimizer.step()
             cls_scheduler.step()
 
             # Print loss value only training
@@ -365,7 +365,7 @@ def augmenter_training(args):
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
         write_log(logger, 'Augmenter Validation MMD Loss: %3.3f' % val_mmd_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'sep_checkpoint.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Augmenter Checkpoint saving...')
             torch.save({

@@ -124,7 +124,7 @@ class TransformerModel(nn.Module):
 
     def classify(self, hidden_states):
 
-        if self.encoder_out_ratio != 0:
+        if self.encoder_out_ratio != 0 and self.encoder_out_ratio != 1:
             hidden_states = hidden_states.max(dim=1)[0]
 
         classifier_out = self.dropout(self.leaky_relu(self.classifier1(hidden_states)))
