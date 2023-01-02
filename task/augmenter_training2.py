@@ -119,10 +119,8 @@ def augmenter_training2(args):
     )
 
     # 3) Optimizer & Learning rate scheduler setting
-    cls_optimizer = optimizer_select(optimizer_model=args.cls_optimizer, model=cls_model, lr=args.cls_lr)
+    cls_optimizer = optimizer_select(optimizer_model=args.cls_optimizer, model=aug_model, lr=args.cls_lr)
     aug_optimizer = optimizer_select(optimizer_model=args.aug_optimizer, model=aug_model, lr=args.aug_lr)
-    cls_scheduler = shceduler_select(phase='cls', scheduler_model=args.cls_scheduler, optimizer=cls_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
-    aug_scheduler = shceduler_select(phase='aug', scheduler_model=args.aug_scheduler, optimizer=aug_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
     cls_scheduler = shceduler_select(phase='cls', scheduler_model=args.cls_scheduler, optimizer=cls_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
     aug_scheduler = shceduler_select(phase='aug', scheduler_model=args.aug_scheduler, optimizer=aug_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
 
@@ -195,7 +193,7 @@ def augmenter_training2(args):
             cls_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(aug_model.parameters(), args.clip_grad_norm)
-            aug_optimizer.step()
+            cls_optimizer.step()
             cls_scheduler.step()
 
             # Print loss value only training

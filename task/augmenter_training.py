@@ -119,8 +119,8 @@ def augmenter_training(args):
     )
 
     # 3) Optimizer & Learning rate scheduler setting
-    cls_optimizer = optimizer_select(optimizer_model=args.cls_optimizer, model=cls_model, lr=args.cls_lr)
-    aug_optimizer = optimizer_select(optimizer_model=args.aug_optimizer, model=aug_model, lr=args.aug_lr)
+    cls_optimizer = optimizer_select(optimizer_model=args.cls_optimizer, model=cls_model, lr=args.cls_lr, w_decay=args.w_decay)
+    aug_optimizer = optimizer_select(optimizer_model=args.aug_optimizer, model=aug_model, lr=args.aug_lr, w_decay=args.w_decay)
     cls_scheduler = shceduler_select(phase='cls', scheduler_model=args.cls_scheduler, optimizer=cls_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
     aug_scheduler = shceduler_select(phase='aug', scheduler_model=args.aug_scheduler, optimizer=aug_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
     cls_scheduler = shceduler_select(phase='cls', scheduler_model=args.cls_scheduler, optimizer=cls_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
@@ -305,6 +305,7 @@ def augmenter_training(args):
 
         seq_list = list()
         eps_dict = dict()
+        prob_dict = dict()
 
         for phase in ['train', 'valid']:
             example_iter = next(iter(dataloader_dict[phase]))
@@ -341,26 +342,58 @@ def augmenter_training(args):
                 origin_output = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
 
             classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
+            original_classy_out = F.softmax(classifier_out)
             cls_loss = cls_criterion(classifier_out, trg_label)
             aug_model.zero_grad()
             cls_loss.backward()
             hidden_states_copy_grad = hidden_states_copy.grad.data
 
             for epsilon in [2, 5, 8]:
-                hidden_states_copy = hidden_states_copy - ((epsilon * 3) * hidden_states_copy_grad)
+                hidden_states_copy = hidden_states_copy - ((epsilon * 1) * hidden_states_copy_grad)
 
                 with torch.no_grad():
                     recon_out = aug_model.generate(src_input_ids=src_sequence, src_attention_mask=src_att,
                                                    latent_z=hidden_states_copy)
+
                 # Augmenting
                 eps_dict[f'eps_{epsilon}'] = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
 
+                with torch.no_grad():
+                    inp_dict = aug_model.tokenizer(eps_dict[f'eps_{epsilon}'],
+                                                   max_length=args.src_max_len,
+                                                   padding='max_length',
+                                                   truncation=True,
+                                                   return_tensors='pt')
+                    encoder_out = aug_model.encode(input_ids=inp_dict['input_ids'].to(device), attention_mask=inp_dict['attention_mask'].to(device))
+                    latent_out = aug_model.latent_encode(input_ids=inp_dict['input_ids'].to(device), encoder_out=encoder_out)
+
+                    # Latent Encoding
+                    if aug_model.encoder_out_ratio == 0:
+                        latent_out_copy = latent_out.clone().detach()
+                        hidden_states_copy = latent_out_copy
+                    elif aug_model.latent_out_ratio == 0:
+                        encoder_out_copy = encoder_out.clone().detach()
+                        hidden_states_copy = encoder_out_copy.max(dim=1)[0]
+                    else:
+                        encoder_out_copy = encoder_out.clone().detach()
+                        latent_out_copy = latent_out.clone().detach()
+                        hidden_states = \
+                        (aug_model.encoder_out_ratio * encoder_out_copy) + (aug_model.latent_out_ratio * latent_out_copy.unsqueeze(1))
+                        hidden_states_copy = hidden_states.clone().detach()
+
+                    classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
+                    prob_dict[f'eps_{epsilon}'] = F.softmax(classifier_out)
+
         write_log(logger, 'Generated Examples')
         write_log(logger, f'Source: {src_output}')
+        write_log(logger, f'Source Probability: {original_classy_out[0]}')
         write_log(logger, f'Augmented_origin: {origin_output}')
         write_log(logger, f'Augmented_2: {eps_dict["eps_2"]}')
+        write_log(logger, f'Augmented_2_prob: {prob_dict["eps_2"]}')
         write_log(logger, f'Augmented_5: {eps_dict["eps_5"]}')
+        write_log(logger, f'Augmented_5_prob: {prob_dict["eps_5"]}')
         write_log(logger, f'Augmented_8: {eps_dict["eps_8"]}')
+        write_log(logger, f'Augmented_8_prob: {prob_dict["eps_8"]}')
 
     # 3) Results
     write_log(logger, f'Best AUG Epoch: {best_aug_epoch}')

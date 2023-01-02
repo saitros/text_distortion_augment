@@ -5,7 +5,7 @@ from .scheduler import WarmupLinearSchedule
 
 from transformers import AdamW
 
-def optimizer_select(optimizer_model, model, lr):
+def optimizer_select(optimizer_model, model, lr, w_decay):
 
     no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
@@ -19,13 +19,13 @@ def optimizer_select(optimizer_model, model, lr):
         },
     ]
     if optimizer_model == 'SGD':
-        optimizer = optim.SGD(optimizer_grouped_parameters, lr, momentum=0.9)
+        optimizer = optim.SGD(optimizer_grouped_parameters, lr, momentum=0.9, weight_decay=w_decay)
     elif optimizer_model == 'Adam':
-        optimizer = optim.Adam(optimizer_grouped_parameters, lr=lr, eps=1e-8)
+        optimizer = optim.Adam(optimizer_grouped_parameters, lr=lr, eps=1e-8, weight_decay=w_decay)
     elif optimizer_model == 'AdamW':
-        optimizer = optimizer = AdamW(optimizer_grouped_parameters, lr=lr, eps=1e-8)
+        optimizer = AdamW(optimizer_grouped_parameters, lr=lr, eps=1e-8, weight_decay=w_decay)
     elif optimizer_model == 'Ralamb':
-        optimizer = Ralamb(optimizer_grouped_parameters, lr=lr)
+        optimizer = Ralamb(optimizer_grouped_parameters, lr=lr, weight_decay=w_decay)
     else:
         raise Exception("Choose optimizer in ['AdamW', 'Adam', 'SGD', 'Ralamb']")
     return optimizer

@@ -110,7 +110,7 @@ def return_model_name(model_type):
     if model_type == 'deberta':
         out = 'microsoft/deberta-v3-base'
     if model_type == 'bart':
-        out = 'facebook/bart-base'
+        out = 'facebook/bart-large'
     if model_type == 'kr_bart':
         out = 'cosmoquester/bart-ko-mini'
     return out
