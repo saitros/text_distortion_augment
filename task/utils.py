@@ -25,26 +25,21 @@ def data_load(args):
     trg_list = dict()
 
     if args.data_name == 'IMDB':
-        imdb_data_path = os.path.join(args.data_path,'IMDB')
-
-        train_dat = pd.read_csv(os.path.join(imdb_data_path, 'train.csv'))
-        test_dat = pd.read_csv(os.path.join(imdb_data_path, 'test.csv'))
-
-        train_dat['sentiment'] = train_dat['sentiment'].replace('positive', 0)
-        train_dat['sentiment'] = train_dat['sentiment'].replace('negative', 1)
-        test_dat['sentiment'] = test_dat['sentiment'].replace('positive', 0)
-        test_dat['sentiment'] = test_dat['sentiment'].replace('negative', 1)
+        dataset = load_dataset("imdb")
+        
+        train_dat = dataset['train']
+        test_dat = dataset['test']
 
         train_index, valid_index, test_index = data_split_index(train_dat, valid_ratio=args.valid_ratio, test_ratio=0)
 
-        src_list['train'] = [train_dat['comment'].tolist()[i] for i in train_index]
-        trg_list['train'] = [train_dat['sentiment'].tolist()[i] for i in train_index]
+        src_list['train'] = [train_dat['text'][i] for i in train_index]
+        trg_list['train'] = [train_dat['label'][i] for i in train_index]
 
-        src_list['valid'] = [train_dat['comment'].tolist()[i] for i in valid_index]
-        trg_list['valid'] = [train_dat['sentiment'].tolist()[i] for i in valid_index]
+        src_list['valid'] = [train_dat['text'][i] for i in valid_index]
+        trg_list['valid'] = [train_dat['label'][i] for i in valid_index]
 
-        src_list['test'] = test_dat['comment'].tolist()
-        trg_list['test'] = test_dat['sentiment'].tolist()
+        src_list['test'] = test_dat['text']
+        trg_list['test'] = test_dat['label']
 
     if args.data_name == 'sst2':
         dataset = load_dataset("glue", args.data_name)
