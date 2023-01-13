@@ -77,8 +77,9 @@ def augmenting(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    aug_model = TransformerModel(model_type=args.model_type,
-                                 isPreTrain=args.isPreTrain, dropout=args.dropout, src_max_len=args.src_max_len)
+    aug_model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len,
+                                 isPreTrain=args.isPreTrain, num_labels=num_labels,
+                                 dropout=args.dropout, encoder_out_ratio=args.encoder_out_ratio)
     cls_model = ClassifierModel(d_latent=aug_model.d_hidden, num_labels=num_labels, dropout=args.dropout)
     aug_model.to(device)
     cls_model.to(device)
