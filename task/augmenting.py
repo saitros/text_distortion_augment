@@ -77,8 +77,9 @@ def augmenting(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    aug_model = TransformerModel(model_type=args.model_type,
-                                 isPreTrain=args.isPreTrain, dropout=args.dropout, src_max_len=args.src_max_len)
+    aug_model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len,
+                                 isPreTrain=args.isPreTrain, num_labels=num_labels,
+                                 dropout=args.dropout, encoder_out_ratio=args.encoder_out_ratio)
     cls_model = ClassifierModel(d_latent=aug_model.d_hidden, num_labels=num_labels, dropout=args.dropout)
     aug_model.to(device)
     cls_model.to(device)
@@ -119,15 +120,16 @@ def augmenting(args):
         aug_list[f'eps_{i}'] = list()
         aug_list[f'eps_{i}_prob'] = list()
 
-    for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
+    for batch_iter in tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}'):
 
-        # Input setting
         b_iter = input_to_device(batch_iter, device=device)
         src_sequence, src_att, src_seg, trg_label = b_iter
-        trg_label = torch.flip(trg_label, dims=[1])
-        # trg_label = torch.full((len(trg_label), num_labels), 1 / num_labels).to(device)
 
-        # Encoding
+        src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
+
+        # Input setting
+        trg_label = torch.flip(trg_label, dims=[1]).to(device)
+
         with torch.no_grad():
             encoder_out = aug_model.encode(input_ids=src_sequence, attention_mask=src_att)
             latent_out = aug_model.latent_encode(input_ids=src_sequence, encoder_out=encoder_out)
@@ -152,15 +154,13 @@ def augmenting(args):
             origin_output = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
 
         classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
+        original_classy_out = F.softmax(classifier_out)
         cls_loss = cls_criterion(classifier_out, trg_label)
         aug_model.zero_grad()
         cls_loss.backward()
         hidden_states_copy_grad = hidden_states_copy.grad.data
 
-        src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
-        seq_list.extend(src_output)
-
-        for epsilon in range(11): # * 0.9
+        for epsilon in [2, 5, 8]:
             hidden_states_copy = hidden_states_copy - ((epsilon * 1) * hidden_states_copy_grad)
 
             with torch.no_grad():
@@ -168,10 +168,10 @@ def augmenting(args):
                                                 latent_z=hidden_states_copy)
 
             # Augmenting
-            aug_list[f'eps_{epsilon}'] = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
+            eps_dict[f'eps_{epsilon}'] = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
 
             with torch.no_grad():
-                inp_dict = aug_model.tokenizer(aug_list[f'eps_{epsilon}'],
+                inp_dict = aug_model.tokenizer(eps_dict[f'eps_{epsilon}'],
                                                 max_length=args.src_max_len,
                                                 padding='max_length',
                                                 truncation=True,
@@ -194,7 +194,7 @@ def augmenting(args):
                     hidden_states_copy = hidden_states.clone().detach()
 
                 classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
-                aug_list[f'eps_{epsilon}_prob'].extend(F.softmax(classifier_out).tolist())
+                prob_dict[f'eps_{epsilon}'] = F.softmax(classifier_out)
 
         if args.debuging_mode:
             break
