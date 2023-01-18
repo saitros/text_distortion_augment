@@ -5,23 +5,28 @@ import gc
 import h5py
 import pickle
 import logging
+import datetime
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
 from time import time
-from transformers import AutoTokenizer
 # Import PyTorch
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader
+from torch.nn.utils import clip_grad_norm_
 from torch.cuda.amp import GradScaler, autocast
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader, RandomSampler
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 # Import custom modules
 from model.model import TransformerModel, ClassifierModel
 from model.dataset import CustomDataset
-from utils import TqdmLoggingHandler, write_log
+from model.loss import compute_mmd, CustomLoss
+from optimizer.utils import shceduler_select, optimizer_select
+from optimizer.scheduler import get_cosine_schedule_with_warmup
+from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
 from task.utils import input_to_device
 
 def augmenting(args):
@@ -60,7 +65,6 @@ def augmenting(args):
         else:
             train_src_token_type_ids = list()
         
-
     with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
         data_ = pickle.load(f)
         src_word2id = data_['src_word2id']
@@ -91,15 +95,23 @@ def augmenting(args):
                                trg_list=train_trg_list, src_max_len=args.src_max_len)
     }
     dataloader_dict = {
-        'train': DataLoader(dataset_dict['train'], drop_last=False,
-                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
-                            num_workers=args.num_workers)
+        'train': DataLoader(dataset_dict['train'], drop_last=True,
+                            batch_size=args.batch_size, shuffle=True,
+                            pin_memory=True, num_workers=args.num_workers)
     }
     write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
 
-    # 3) Model loading
+    del (
+        train_src_input_ids, train_src_attention_mask, train_src_token_type_ids, train_trg_list
+    )
+
     cudnn.benchmark = True
-    cls_criterion = nn.CrossEntropyLoss().to(device)
+    cls_criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps).to(device)
+    recon_criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=aug_model.pad_idx).to(device)
+    # cls_criterion = nn.CrossEntropyLoss().to(device)
+    # recon_criterion = nn.CrossEntropyLoss(ignore_index=aug_model.pad_idx).to(device)
+
+    # 3) Model resume
     save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
     checkpoint = torch.load(save_file_name)
     aug_model.load_state_dict(checkpoint['aug_model'])
@@ -109,21 +121,21 @@ def augmenting(args):
     #===================================#
     #=========Model Train Start=========#
     #===================================#
-    
-    start_time_e = time()
-    write_log(logger, 'Augmenting start...')
-    aug_model.eval()
-    cls_model.eval()
+
+    write_log(logger, 'Traing start!')
+
+    #===================================#
+    #=========Text Augmentation=========#
+    #===================================#
+
     seq_list = list()
-    aug_list = dict()
-    for i in range(11):
-        aug_list[f'eps_{i}'] = list()
-        aug_list[f'eps_{i}_prob'] = list()
+    eps_dict = dict()
+    prob_dict = dict()
 
-    for batch_iter in tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}'):
+    for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
-        b_iter = input_to_device(batch_iter, device=device)
-        src_sequence, src_att, src_seg, trg_label = b_iter
+        example_iter_ = input_to_device(batch_iter, device=device)
+        src_sequence, src_att, src_seg, trg_label = example_iter_
 
         src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
 
@@ -196,25 +208,19 @@ def augmenting(args):
                 classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
                 prob_dict[f'eps_{epsilon}'] = F.softmax(classifier_out)
 
-        if args.debuging_mode:
-            break
-            
-    result_dat = pd.DataFrame({
-        'seq': seq_list,
-        'aug_0': aug_list['eps_0'],
-        'aug_1': aug_list['eps_1'],
-        'aug_2': aug_list['eps_2'],
-        'aug_3': aug_list['eps_3'],
-        'aug_4': aug_list['eps_4'],
-        'aug_5': aug_list['eps_5'],
-        'aug_6': aug_list['eps_6'],
-        'aug_7': aug_list['eps_7'],
-        'aug_8': aug_list['eps_8'],
-        'aug_9': aug_list['eps_9'],
-        'aug_10': aug_list['eps_10']
-    })
-    result_dat.to_csv('./augmenting_result.csv', index=False)
+        write_log(logger, 'Generated Examples')
+        write_log(logger, f'Source: {src_output}')
+        write_log(logger, f'Source Probability: {original_classy_out[0]}')
+        write_log(logger, f'Augmented_origin: {origin_output}')
+        write_log(logger, f'Augmented_2: {eps_dict["eps_2"]}')
+        write_log(logger, f'Augmented_2_prob: {prob_dict["eps_2"]}')
+        write_log(logger, f'Augmented_5: {eps_dict["eps_5"]}')
+        write_log(logger, f'Augmented_5_prob: {prob_dict["eps_5"]}')
+        write_log(logger, f'Augmented_8: {eps_dict["eps_8"]}')
+        write_log(logger, f'Augmented_8_prob: {prob_dict["eps_8"]}')
 
-    #===================================#
-    #=========Tokenizing=========#
-    #===================================#
+    # 3) Results
+    write_log(logger, f'Best AUG Epoch: {best_aug_epoch}')
+    write_log(logger, f'Best AUG Loss: {round(best_aug_val_loss.item(), 2)}')
+    write_log(logger, f'Best CLS Epoch: {best_cls_epoch}')
+    write_log(logger, f'Best CLS Loss: {round(best_cls_val_loss.item(), 2)}')
