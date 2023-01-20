@@ -360,11 +360,8 @@ def augmenter_training(args):
 
             # Reconstruction Output Tokenizing & Pre-processing
             eps_dict['eps_0'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
-            inp_dict = aug_model.tokenizer(eps_dict['eps_0'],
-                                           max_length=args.src_max_len,
-                                           padding='max_length',
-                                           truncation=True,
-                                           return_tensors='pt')
+            inp_dict = model.tokenizer(eps_dict['eps_0'], max_length=args.src_max_len, 
+                                       padding='max_length', truncation=True, return_tensors='pt')
             # Probability Calculate
             with torch.no_grad():
                 encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device), 
@@ -376,6 +373,7 @@ def augmenter_training(args):
             # Iterative Latent Encoding
             encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
             latent_out_copy, _ = model.latent_encode(encoder_out=encoder_out_copy)
+            latent_out_copy.retain_grad()
 
             classifier_out = model.classify(latent_out=latent_out_copy)
             cls_loss = cls_criterion(classifier_out, trg_label)
@@ -384,7 +382,7 @@ def augmenter_training(args):
             latent_out_copy_grad = latent_out_copy.grad.data
 
             for epsilon in [2, 5, 8]:
-                latent_out_copy = latent_out_copy - ((epsilon * 0.9) * latent_out_copy_grad)
+                latent_out_copy = latent_out_copy - ((epsilon * 3) * latent_out_copy_grad)
 
                 with torch.no_grad():
                     recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
@@ -393,36 +391,21 @@ def augmenter_training(args):
                 eps_dict[f'eps_{epsilon}'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
 
                 with torch.no_grad():
-                    inp_dict = aug_model.tokenizer(eps_dict[f'eps_{epsilon}'],
+                    inp_dict = model.tokenizer(eps_dict[f'eps_{epsilon}'],
                                                    max_length=args.src_max_len,
                                                    padding='max_length',
                                                    truncation=True,
                                                    return_tensors='pt')
-                    encoder_out = aug_model.encode(input_ids=inp_dict['input_ids'].to(device), attention_mask=inp_dict['attention_mask'].to(device))
-                    latent_out = aug_model.latent_encode(input_ids=inp_dict['input_ids'].to(device), encoder_out=encoder_out)
-
-                    # Latent Encoding
-                    if aug_model.encoder_out_ratio == 0:
-                        latent_out_copy = latent_out.clone().detach()
-                        hidden_states_copy = latent_out_copy
-                    elif aug_model.latent_out_ratio == 0:
-                        encoder_out_copy = encoder_out.clone().detach()
-                        hidden_states_copy = encoder_out_copy.max(dim=1)[0]
-                    else:
-                        encoder_out_copy = encoder_out.clone().detach()
-                        latent_out_copy = latent_out.clone().detach()
-                        hidden_states = \
-                        (aug_model.encoder_out_ratio * encoder_out_copy) + (aug_model.latent_out_ratio * latent_out_copy.unsqueeze(1))
-                        hidden_states_copy = hidden_states.clone().detach()
-
-                    classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
+                    encoder_out = model.encode(input_ids=inp_dict['input_ids'].to(device), attention_mask=inp_dict['attention_mask'].to(device))
+                    latent_out, _ = model.latent_encode(encoder_out=encoder_out)
+                    classifier_out = model.classify(latent_out=latent_out)
                     prob_dict[f'eps_{epsilon}'] = F.softmax(classifier_out)
 
             write_log(logger, f'Generated Examples')
             write_log(logger, f'Phase: {phase}')
             write_log(logger, f'Source: {src_output}')
-            write_log(logger, f'Source Probability: {original_classy_out[0]}')
-            write_log(logger, f'Augmented_origin: {origin_output}')
+            write_log(logger, f'Source Probability: {prob_dict["eps_0"]}')
+            write_log(logger, f'Augmented_origin: {eps_dict["eps_0"]}')
             write_log(logger, f'Augmented_2: {eps_dict["eps_2"]}')
             write_log(logger, f'Augmented_2_prob: {prob_dict["eps_2"]}')
             write_log(logger, f'Augmented_5: {eps_dict["eps_5"]}')

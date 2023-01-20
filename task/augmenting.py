@@ -76,12 +76,9 @@ def augmenting(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    aug_model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len,
-                                 isPreTrain=args.isPreTrain, num_labels=num_labels,
-                                 dropout=args.dropout, encoder_out_ratio=args.encoder_out_ratio)
-    cls_model = ClassifierModel(d_latent=aug_model.d_hidden, num_labels=num_labels, dropout=args.dropout)
-    aug_model.to(device)
-    cls_model.to(device)
+    model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len, isPreTrain=args.isPreTrain, 
+                             num_labels=num_labels, dropout=args.dropout)
+    model.to(device)
 
     # 2) Dataloader setting
     dataset_dict = {
@@ -101,7 +98,7 @@ def augmenting(args):
     cls_criterion = nn.CrossEntropyLoss().to(device)
     save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, f'{args.cls_scheduler}_{args.aug_num_epochs}_checkpoint.pth.tar')
     checkpoint = torch.load(save_file_name)
-    aug_model.load_state_dict(checkpoint['aug_model'])
+    model.load_state_dict(checkpoint['model'])
     cls_model.load_state_dict(checkpoint['cls_model'])
     write_log(logger, f'Loaded augmenter model from {save_file_name}')
 
@@ -111,11 +108,11 @@ def augmenting(args):
     
     start_time_e = time()
     write_log(logger, 'Augmenting start...')
-    aug_model.eval()
+    model.eval()
     cls_model.eval()
     seq_list = list()
     aug_list = dict()
-    epsilon_list = [0, 1, 1.0001, 2, 3, 5, 8, 10]
+    epsilon_list = [0, 1, 2, 3, 5, 8, 10]
     latent_pre_list = list()
     latent_now_list = list()
     latent_next_list = list()
@@ -134,35 +131,35 @@ def augmenting(args):
 
         # Encoding
         with torch.no_grad():
-            encoder_out = aug_model.encode(input_ids=src_sequence, attention_mask=src_att)
-            latent_out = aug_model.latent_encode(input_ids=src_sequence, encoder_out=encoder_out)
+            encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+            latent_out = model.latent_encode(input_ids=src_sequence, encoder_out=encoder_out)
 
         # Latent Encoding
-        if aug_model.encoder_out_ratio == 0:
+        if model.encoder_out_ratio == 0:
             latent_out_copy = latent_out.clone().detach().requires_grad_(True)
             hidden_states_copy = latent_out_copy
-        elif aug_model.latent_out_ratio == 0:
+        elif model.latent_out_ratio == 0:
             encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
             hidden_states_copy = encoder_out_copy.max(dim=1)[0]
         else:
             encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
             latent_out_copy = latent_out.clone().detach().requires_grad_(True)
             hidden_states = \
-            (aug_model.encoder_out_ratio * encoder_out_copy) + (aug_model.latent_out_ratio * latent_out_copy.unsqueeze(1))
+            (model.encoder_out_ratio * encoder_out_copy) + (model.latent_out_ratio * latent_out_copy.unsqueeze(1))
             hidden_states_copy = hidden_states.clone().detach().requires_grad_(True)
 
         with torch.no_grad():
-            recon_out = aug_model(input_ids=src_sequence, attention_mask=src_att, 
+            recon_out = model(input_ids=src_sequence, attention_mask=src_att, 
                                 hidden_states=hidden_states_copy)
-            origin_output = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
+            origin_output = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
 
-        classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
+        classifier_out = model.classify(hidden_states=hidden_states_copy)
         cls_loss = cls_criterion(classifier_out, trg_label)
-        aug_model.zero_grad()
+        model.zero_grad()
         cls_loss.backward()
         hidden_states_copy_grad = hidden_states_copy.grad.data
 
-        src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
+        src_output = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
         seq_list.extend(src_output)
 
         for epsilon in epsilon_list: # * 0.9
@@ -171,35 +168,35 @@ def augmenting(args):
             # hidden_states_copy = ((epsilon * 1) * hidden_states_copy_grad) - hidden_states_copy
 
             with torch.no_grad():
-                recon_out = aug_model.generate(src_input_ids=src_sequence, src_attention_mask=src_att,
+                recon_out = model.generate(src_input_ids=src_sequence, src_attention_mask=src_att,
                                                 latent_z=hidden_states_copy)
 
             # Augmenting
-            # aug_list[f'eps_{epsilon}'] = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]  # origin
-            # aug_list[f'eps_{epsilon}'].append(aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]) # one batch
-            aug_list[f'eps_{epsilon}'].extend([i for i in aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)])
+            # aug_list[f'eps_{epsilon}'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]  # origin
+            # aug_list[f'eps_{epsilon}'].append(model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]) # one batch
+            aug_list[f'eps_{epsilon}'].extend([i for i in model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)])
     
             with torch.no_grad():
-                inp_dict = aug_model.tokenizer(aug_list[f'eps_{epsilon}'][-1],
+                inp_dict = model.tokenizer(aug_list[f'eps_{epsilon}'][-1],
                                                 max_length=args.src_max_len,
                                                 padding='max_length',
                                                 truncation=True,
                                                 return_tensors='pt')
-                encoder_out = aug_model.encode(input_ids=inp_dict['input_ids'].to(device), attention_mask=inp_dict['attention_mask'].to(device))
-                latent_out = aug_model.latent_encode(input_ids=inp_dict['input_ids'].to(device), encoder_out=encoder_out)
+                encoder_out = model.encode(input_ids=inp_dict['input_ids'].to(device), attention_mask=inp_dict['attention_mask'].to(device))
+                latent_out = model.latent_encode(input_ids=inp_dict['input_ids'].to(device), encoder_out=encoder_out)
                 
                 # Latent Encoding
-                if aug_model.encoder_out_ratio == 0:
+                if model.encoder_out_ratio == 0:
                     latent_out_copy = latent_out.clone().detach()
                     hidden_states_copy = latent_out_copy
-                elif aug_model.latent_out_ratio == 0:
+                elif model.latent_out_ratio == 0:
                     encoder_out_copy = encoder_out.clone().detach()
                     hidden_states_copy = encoder_out_copy.max(dim=1)[0]
                 else:
                     encoder_out_copy = encoder_out.clone().detach()
                     latent_out_copy = latent_out.clone().detach()
                     hidden_states = \
-                    (aug_model.encoder_out_ratio * encoder_out_copy) + (aug_model.latent_out_ratio * latent_out_copy.unsqueeze(1))
+                    (model.encoder_out_ratio * encoder_out_copy) + (model.latent_out_ratio * latent_out_copy.unsqueeze(1))
                     hidden_states_copy = hidden_states.clone().detach()
 
                 if i == 1:
@@ -209,7 +206,7 @@ def augmenting(args):
                 elif i == 3:
                     latent_next_list.append(hidden_states_copy)
 
-                classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
+                classifier_out = model.classify(hidden_states=hidden_states_copy)
                 aug_list[f'eps_{epsilon}_prob'].extend(F.softmax(classifier_out).tolist())
         
         # if i == 3: 
