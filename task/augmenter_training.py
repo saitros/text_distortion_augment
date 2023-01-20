@@ -339,9 +339,7 @@ def augmenter_training(args):
         #=========Text Augmentation=========#
         #===================================#
 
-        seq_list = list()
-        eps_dict = dict()
-        prob_dict = dict()
+        eps_dict, prob_dict = dict(), dict()
 
         for phase in ['train', 'valid']:
             example_iter = next(iter(dataloader_dict[phase]))
@@ -351,18 +349,28 @@ def augmenter_training(args):
 
             src_output = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
 
-            # Input setting
+            # Target Label Setting
             trg_label = torch.flip(trg_label, dims=[1]).to(device)
 
-            # Encoding
+            # Original Reconstruction
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
                 latent_out, _ = model.latent_encode(encoder_out=encoder_out)
-                classifier_out = model.classify(latent_out=latent_out)
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
-            #
+            # Reconstruction Output Tokenizing & Pre-processing
             eps_dict['eps_0'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
+            inp_dict = aug_model.tokenizer(eps_dict['eps_0'],
+                                           max_length=args.src_max_len,
+                                           padding='max_length',
+                                           truncation=True,
+                                           return_tensors='pt')
+            # Probability Calculate
+            with torch.no_grad():
+                encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device), 
+                                                 attention_mask=inp_dict['attention_mask'].to(device))
+                latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
+                classifier_out = model.classify(latent_out=latent_out_eps_0)
             prob_dict['eps_0'] = F.softmax(classifier_out)
 
             # Iterative Latent Encoding
