@@ -13,8 +13,7 @@ from model.utils import model_setting
 
 class TransformerModel(nn.Module):
     def __init__(self, model_type: str = 'bart', src_max_len: int = 150,
-                 isPreTrain: bool = True, num_labels: int = 2,
-                 dropout: float = 0.3, encoder_out_ratio: float = 0.5):
+                 isPreTrain: bool = True, num_labels: int = 2, dropout: float = 0.3):
         super().__init__()
 
         """
@@ -35,12 +34,6 @@ class TransformerModel(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.model_type = model_type
 
-        # Ratio setting
-        assert encoder_out_ratio >= 0
-        assert encoder_out_ratio <= 1
-        self.encoder_out_ratio = encoder_out_ratio
-        self.latent_out_ratio = 1 - encoder_out_ratio
-
         # Model setting
         model_name = return_model_name(self.model_type)
         encoder, decoder, model_config = model_setting(model_name, self.isPreTrain)
@@ -51,23 +44,24 @@ class TransformerModel(nn.Module):
         self.num_labels = num_labels
         self.vocab_num = model_config.vocab_size
 
+        # Encoder setting
         self.encoder = encoder
-        self.decoder = decoder
 
-        # Encoding
-        self.position = PositionalEmbedding(d_model=self.d_hidden, max_len=self.src_max_len)
-        self.gru = nn.GRU(input_size=self.d_hidden, hidden_size=self.d_hidden, num_layers=3, batch_first=True)
-
-        # Augmenter Model Setting
-        self.decoder_linear = nn.Linear(self.d_hidden, self.d_embedding)
-        self.decoder_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
-        self.decoder_augmenter = nn.Linear(self.d_embedding, self.vocab_num)
+        # Latent Setting
+        self.latent_encoder = nn.Linear(self.d_hidden, self.d_embedding)
+        self.latent_decoder = nn.Linear(self.d_embedding, self.d_hidden)
 
         # Classifier
         self.classifier1 = nn.Linear(self.d_hidden, self.d_embedding)
         self.classifier2 = nn.Linear(self.d_embedding, self.d_embedding)
-        self.classifier3 = nn.Linear(self.d_embedding, 2)
+        self.classifier3 = nn.Linear(self.d_embedding, self.num_labels)
         self.leaky_relu = nn.LeakyReLU(0.1)
+
+        # Augmenter Model Setting
+        self.decoder = decoder
+        self.decoder_linear = nn.Linear(self.d_hidden, self.d_embedding)
+        self.decoder_norm = nn.LayerNorm(self.d_embedding, eps=1e-12)
+        self.decoder_augmenter = nn.Linear(self.d_embedding, self.vocab_num)
 
         # Tokenizer Setting
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -87,65 +81,44 @@ class TransformerModel(nn.Module):
 
         return encoder_out
 
-    def latent_encode(self, input_ids, encoder_out):
-        latent_out = encoder_out + self.position(input_ids) # (batch_size, seq_len, d_hidden)
-        latent_out, _ = self.gru(encoder_out) # (batch_size, seq_len, d_hidden)
-        latent_out = latent_out.max(dim=1)[0] # (batch_size, d_hidden)
+    def latent_encode(self, encoder_out):
+        latent_out = encoder_out.mean(dim=1) # (batch_size, d_hidden)
+        latent_encoder_out = self.latent_encoder(latent_out) # (batch_size, d_embedding)
+        latent_decoder_out = self.latent_decoder(latent_encoder_out) # (batch_size, d_hidden)
 
-        return latent_out
+        return latent_decoder_out, latent_encoder_out
 
-    def decode(self, input_ids, attention_mask, hidden_states):
+    def classify(self, latent_out):
 
-        decoder_input_ids = shift_tokens_right(
-            input_ids, self.pad_idx, self.decoder_start_token_id
-        )
-        # decoder_input_ids = input_ids
-
-        if self.encoder_out_ratio == 0:
-            encoder_attention_mask = attention_mask[:,0].unsqueeze(1)
-        else:
-            encoder_attention_mask = attention_mask
-        
-        decoder_outputs = self.decoder(
-            input_ids=decoder_input_ids,
-            encoder_hidden_states=hidden_states,
-            encoder_attention_mask=encoder_attention_mask
-        )
-        decoder_outputs = decoder_outputs['last_hidden_state']
-
-        return decoder_outputs
-
-    def reconstruct(self, decoder_out):
-
-        decoder_out = self.dropout(F.gelu(self.decoder_linear(decoder_out)))
-        decoder_out = self.decoder_augmenter(self.decoder_norm(decoder_out))
-
-        return decoder_out
-
-    def classify(self, hidden_states):
-
-        if self.encoder_out_ratio != 0 and self.encoder_out_ratio != 1:
-            hidden_states = hidden_states.max(dim=1)[0]
-
-        classifier_out = self.dropout(self.leaky_relu(self.classifier1(hidden_states)))
+        classifier_out = self.dropout(self.leaky_relu(self.classifier1(latent_out)))
         classifier_out = self.dropout(self.leaky_relu(self.classifier2(classifier_out)))
         classifier_out = self.classifier3(classifier_out)
 
         return classifier_out
 
-    def forward(self, input_ids, attention_mask, hidden_states):
+    def forward(self, input_ids, attention_mask, encoder_out, latent_out):
 
-        # Decoding
-        decoder_out = self.decode(input_ids=input_ids,
-                                  attention_mask=attention_mask,
-                                  hidden_states=hidden_states)
+        seq_len = input_ids.size(1)
 
-        # Reconstruct
-        recon_out = self.reconstruct(decoder_out=decoder_out)
+        decoder_input_ids = shift_tokens_right(
+            input_ids, self.pad_idx, self.decoder_start_token_id
+        )
 
-        return recon_out
+        hidden_states = encoder_out + latent_out.unsqueeze(1).expand(-1, seq_len, -1) # 이거 애매
+        
+        decoder_outputs = self.decoder(
+            input_ids=decoder_input_ids,
+            encoder_hidden_states=hidden_states,
+            encoder_attention_mask=attention_mask
+        )
+        decoder_outputs = decoder_outputs['last_hidden_state']
 
-    def generate(self, src_input_ids, src_attention_mask, latent_z):
+        decoder_outputs = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
+        decoder_outputs = self.decoder_augmenter(self.decoder_norm(decoder_outputs))
+
+        return decoder_outputs
+
+    def generate(self, src_input_ids, src_attention_mask, latent_z): # Need to fix
 
         if self.encoder_out_ratio == 0:
             encoder_attention_mask = src_attention_mask[:,0].unsqueeze(1)

@@ -60,7 +60,6 @@ def augmenting(args):
         else:
             train_src_token_type_ids = list()
         
-
     with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
         data_ = pickle.load(f)
         src_word2id = data_['src_word2id']

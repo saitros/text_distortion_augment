@@ -87,12 +87,9 @@ def augmenter_training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    aug_model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len,
-                                 isPreTrain=args.isPreTrain, num_labels=num_labels,
-                                 dropout=args.dropout, encoder_out_ratio=args.encoder_out_ratio)
-    cls_model = ClassifierModel(d_latent=aug_model.d_hidden, num_labels=num_labels, dropout=args.dropout)
-    aug_model.to(device)
-    cls_model.to(device)
+    model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len,
+                                 isPreTrain=args.isPreTrain, num_labels=num_labels, dropout=args.dropout)
+    model.to(device)
 
     # 2) Dataloader setting
     dataset_dict = {
@@ -119,31 +116,29 @@ def augmenter_training(args):
     )
 
     # 3) Optimizer & Learning rate scheduler setting
-    cls_optimizer = optimizer_select(optimizer_model=args.cls_optimizer, model=cls_model, lr=args.cls_lr, w_decay=args.w_decay)
-    aug_optimizer = optimizer_select(optimizer_model=args.aug_optimizer, model=aug_model, lr=args.aug_lr, w_decay=args.w_decay)
-    cls_scheduler = shceduler_select(phase='cls', scheduler_model=args.cls_scheduler, optimizer=cls_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
-    aug_scheduler = shceduler_select(phase='aug', scheduler_model=args.aug_scheduler, optimizer=aug_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
+    cls_optimizer = optimizer_select(optimizer_model=args.cls_optimizer, model=model, lr=args.cls_lr, w_decay=args.w_decay)
+    aug_optimizer = optimizer_select(optimizer_model=args.aug_optimizer, model=model, lr=args.aug_lr, w_decay=args.w_decay)
     cls_scheduler = shceduler_select(phase='cls', scheduler_model=args.cls_scheduler, optimizer=cls_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
     aug_scheduler = shceduler_select(phase='aug', scheduler_model=args.aug_scheduler, optimizer=aug_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
 
     cudnn.benchmark = True
     cls_criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps).to(device)
-    recon_criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=aug_model.pad_idx).to(device)
-    # cls_criterion = nn.CrossEntropyLoss().to(device)
-    # recon_criterion = nn.CrossEntropyLoss(ignore_index=aug_model.pad_idx).to(device)
+    recon_criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=model.pad_idx).to(device)
 
     # 3) Model resume
     start_epoch = 0
+    cls_training_done = False
     if args.resume:
         write_log(logger, 'Resume model...')
-        save_path = os.path.join(args.model_save_path, args.data_name)
-        save_file_name = os.path.join(save_path, 
-                                        f'checkpoint_src_{args.src_vocab_size}_trg_{args.trg_vocab_size}_v_{args.variational_mode}_p_{args.parallel}.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
         checkpoint = torch.load(save_file_name)
+        cls_training_done = checkpoint['cls_training_done']
         start_epoch = checkpoint['epoch'] - 1
         model.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        scheduler.load_state_dict(checkpoint['scheduler'])
+        cls_optimizer.load_state_dict(checkpoint['cls_optimizer'])
+        aug_optimizer.load_state_dict(checkpoint['aug_optimizer'])
+        cls_scheduler.load_state_dict(checkpoint['cls_scheduler'])
+        aug_scheduler.load_state_dict(checkpoint['aug_scheduler'])
         del checkpoint
 
     #===================================#
@@ -154,12 +149,108 @@ def augmenter_training(args):
     best_aug_val_loss = 1e+4
     best_cls_val_loss = 1e+4
     
+    for epoch in range(start_epoch + 1, args.cls_num_epochs + 1):
+        start_time_e = time()
+
+        if cls_training_done:
+            break
+
+        write_log(logger, 'Classifier training start...')
+        model.train()
+
+        for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
+
+            cls_optimizer.zero_grad(set_to_none=True)
+
+            # Input setting
+            b_iter = input_to_device(batch_iter, device=device)
+            src_sequence, src_att, src_seg, trg_label = b_iter
+
+            # Encoding
+            encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+            latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+
+            # Classifier
+            classifier_out = model.classify(latent_out=latent_out)
+            cls_loss = cls_criterion(classifier_out, trg_label)
+            mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+
+            # Loss Backward
+            total_cls_loss = cls_loss + mmd_loss
+            total_cls_loss.backward()
+            if args.clip_grad_norm > 0:
+                clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+            cls_optimizer.step()
+            cls_scheduler.step()
+
+            # Print loss value only training
+            if i == 0 or i % args.print_freq == 0 or i == len(dataloader_dict['train'])-1:
+                train_acc = (classifier_out.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
+                iter_log = "[Epoch:%03d][%03d/%03d] train_cls_loss:%03.2f | train_accuracy:%03.2f | train_mmd_loss:%03.2f | learning_rate:%1.6f |spend_time:%02.2fmin" % \
+                    (epoch, i, len(dataloader_dict['train'])-1, cls_loss.item(), train_acc.item(), mmd_loss.item(), cls_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                write_log(logger, iter_log)
+
+            if args.debuging_mode:
+                break
+
+        write_log(logger, 'Classifier validation start...')
+        model.eval()
+        val_cls_loss = 0
+        val_acc = 0
+        val_mmd_loss = 0
+
+        for batch_iter in tqdm(dataloader_dict['valid'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}'):
+
+            b_iter = input_to_device(batch_iter, device=device)
+            src_sequence, src_att, src_seg, trg_label = b_iter
+        
+            with torch.no_grad():
+                encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+
+                # Classifier
+                classifier_out = model.classify(latent_out=latent_out)
+                cls_loss = cls_criterion(classifier_out, trg_label)
+                mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+
+            # Loss and Accuracy Check
+            val_acc += (classifier_out.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
+            val_cls_loss += cls_loss
+            val_mmd_loss += mmd_loss
+
+            if args.debuging_mode:
+                break
+
+        val_mmd_loss /= len(dataloader_dict['valid'])
+        val_cls_loss /= len(dataloader_dict['valid'])
+        val_acc /= len(dataloader_dict['valid'])
+        write_log(logger, 'Classifier Validation MMD Loss: %3.3f' % val_mmd_loss)
+        write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
+        write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
+
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
+        if val_cls_loss < best_cls_val_loss:
+            write_log(logger, 'Augmenter Checkpoint saving...')
+            torch.save({
+                'cls_training_done': False,
+                'epoch': epoch,
+                'model': model.state_dict(),
+                'cls_optimizer': cls_optimizer.state_dict(),
+                'aug_optimizer': aug_optimizer.state_dict(),
+                'cls_scheduler': cls_scheduler.state_dict(),
+                'aug_scheduler': aug_scheduler.state_dict(),
+            }, save_file_name)
+            best_cls_val_loss = val_cls_loss
+            best_cls_epoch = epoch
+        else:
+            else_log = f'Still {best_cls_epoch} epoch Loss({round(best_cls_val_loss.item(), 2)}) is better...'
+            write_log(logger, else_log)
+
     for epoch in range(start_epoch + 1, args.aug_num_epochs + 1):
         start_time_e = time()
 
         write_log(logger, 'Augmenter training start...')
-        aug_model.train()
-        cls_model.train()
+        model.train()
 
         for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
@@ -169,58 +260,31 @@ def augmenter_training(args):
             b_iter = input_to_device(batch_iter, device=device)
             src_sequence, src_att, src_seg, trg_label = b_iter
 
-            #===================================#
-            #=============Encoding==============#
-            #===================================#
-            encoder_out = aug_model.encode(input_ids=src_sequence, attention_mask=src_att)
-            latent_out = aug_model.latent_encode(input_ids=src_sequence, encoder_out=encoder_out)
+            # Encoding
+            with torch.no_grad():
+                encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+                latent_out, _ = model.latent_encode(encoder_out=encoder_out)
 
-            #===================================#
-            #=============Classify==============#
-            #===================================#
-
-            if aug_model.encoder_out_ratio == 0:
-                hidden_states = latent_out
-            elif aug_model.latent_out_ratio == 0:
-                hidden_states = encoder_out.max(dim=1)[0]
-            else:
-                hidden_states = \
-                (aug_model.encoder_out_ratio * encoder_out) + (aug_model.latent_out_ratio * latent_out.unsqueeze(1))
-
-            classifier_out = aug_model.classify(hidden_states=hidden_states)
-
-            # Classifier Loss
-            cls_loss = cls_criterion(classifier_out, trg_label)
-
-            #===================================#
-            #============Reconstruct============#
-            #===================================#
-            recon_out = aug_model(input_ids=src_sequence, attention_mask=src_att, 
-                                  hidden_states=hidden_states)
-
-            # Reconstruction Loss
+            # Reconstruction
+            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
-            # Latent MMD Loss
-            if aug_model.latent_out_ratio > 0 and args.latent_mmd_loss:
-                mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
-            else:
-                mmd_loss = torch.tensor(0.0).to(device)
 
-            aug_loss = mmd_loss + recon_loss + cls_loss
-            aug_loss.backward()
+            # Loss Backward
+            recon_loss.backward()
             if args.clip_grad_norm > 0:
-                clip_grad_norm_(aug_model.parameters(), args.clip_grad_norm)
+                clip_grad_norm_(model.parameters(), args.clip_grad_norm)
             aug_optimizer.step()
             aug_scheduler.step()
 
-            if args.debuging_mode:
-                break
-
             # Print loss value only training
             if i == 0 or i % args.print_freq == 0 or i == len(dataloader_dict['train'])-1:
-                iter_log = "[Epoch:%03d][%03d/%03d] train_cls_loss:%03.2f | train_recon_loss:%03.2f | train_mmd_loss:%03.2f | learning_rate:%1.6f |spend_time:%02.2fmin" % \
-                    (epoch, i, len(dataloader_dict['train'])-1, cls_loss.item(), recon_loss.item(), mmd_loss.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                # train_acc = (recon_out.view(-1, src_vocab_num).argmax(dim=1) == src_sequence.contiguous().view(-1)).sum() / len(src_sequence)
+                iter_log = "[Epoch:%03d][%03d/%03d] train_recon_loss:%03.2f | learning_rate:%1.6f |spend_time:%02.2fmin" % \
+                    (epoch, i, len(dataloader_dict['train'])-1, recon_loss.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                 write_log(logger, iter_log)
+
+            if args.debuging_mode:
+                break
 
         #===================================#
         #============Validation=============#
@@ -228,12 +292,7 @@ def augmenter_training(args):
         write_log(logger, 'Augmenter validation start...')
 
         # Validation 
-        aug_model.eval()
-        cls_model.eval()
-
-        val_cls_loss = 0
-        val_acc = 0
-        val_mmd_loss = 0
+        model.eval()
         val_recon_loss = 0
 
         for batch_iter in tqdm(dataloader_dict['valid'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}'):
@@ -241,57 +300,34 @@ def augmenter_training(args):
             b_iter = input_to_device(batch_iter, device=device)
             src_sequence, src_att, src_seg, trg_label = b_iter
         
+            # Encoding
             with torch.no_grad():
-                encoder_out = aug_model.encode(input_ids=src_sequence, attention_mask=src_att)
-                latent_out = aug_model.latent_encode(input_ids=src_sequence, encoder_out=encoder_out)
-
-                if aug_model.encoder_out_ratio == 0:
-                    hidden_states = latent_out
-                elif aug_model.latent_out_ratio == 0:
-                    hidden_states = encoder_out.max(dim=1)[0]
-                else:
-                    hidden_states = \
-                    (aug_model.encoder_out_ratio * encoder_out) + (aug_model.latent_out_ratio * latent_out.unsqueeze(1))
-
-                classifier_out = aug_model.classify(hidden_states=hidden_states)
-                recon_out = aug_model(input_ids=src_sequence, attention_mask=src_att, 
-                                      hidden_states=hidden_states)
-
-                # Classifier Loss
-                cls_loss = cls_criterion(classifier_out, trg_label)
-                
-                # Latent MMD Loss
-                if aug_model.latent_out_ratio > 0 and args.latent_mmd_loss:
-                    mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
-                else:
-                    mmd_loss = torch.tensor(0.0).to(device)
+                encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+                latent_out, _ = model.latent_encode(encoder_out=encoder_out)
+                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
+                recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
                 # Reconstruction Loss
                 recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
-
-                val_cls_loss += cls_loss
-                val_acc += (classifier_out.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
-                val_mmd_loss += mmd_loss
                 val_recon_loss += recon_loss
 
             if args.debuging_mode:
                 break
 
         val_recon_loss /= len(dataloader_dict['valid'])
-        val_mmd_loss /= len(dataloader_dict['valid'])
-        val_cls_loss /= len(dataloader_dict['valid'])
-        val_acc /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
-        write_log(logger, 'Augmenter Validation MMD Loss: %3.3f' % val_mmd_loss)
-        write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
-        write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
         save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Augmenter Checkpoint saving...')
             torch.save({
-                'aug_model': aug_model.state_dict(),
-                'cls_model': cls_model.state_dict()
+                'cls_training_done': True,
+                'epoch': epoch,
+                'model': model.state_dict(),
+                'cls_optimizer': cls_optimizer.state_dict(),
+                'aug_optimizer': aug_optimizer.state_dict(),
+                'cls_scheduler': cls_scheduler.state_dict(),
+                'aug_scheduler': aug_scheduler.state_dict(),
             }, save_file_name)
             best_aug_val_loss = val_recon_loss
             best_aug_epoch = epoch
@@ -313,50 +349,40 @@ def augmenter_training(args):
             example_iter_ = input_to_device(example_iter, device=device)
             src_sequence, src_att, src_seg, trg_label = example_iter_
 
-            src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
+            src_output = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
 
             # Input setting
             trg_label = torch.flip(trg_label, dims=[1]).to(device)
 
+            # Encoding
             with torch.no_grad():
-                encoder_out = aug_model.encode(input_ids=src_sequence, attention_mask=src_att)
-                latent_out = aug_model.latent_encode(input_ids=src_sequence, encoder_out=encoder_out)
+                encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+                latent_out, _ = model.latent_encode(encoder_out=encoder_out)
+                classifier_out = model.classify(latent_out=latent_out)
+                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
-            # Latent Encoding
-            if aug_model.encoder_out_ratio == 0:
-                latent_out_copy = latent_out.clone().detach().requires_grad_(True)
-                hidden_states_copy = latent_out_copy
-            elif aug_model.latent_out_ratio == 0:
-                encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-                hidden_states_copy = encoder_out_copy.max(dim=1)[0]
-            else:
-                encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-                latent_out_copy = latent_out.clone().detach().requires_grad_(True)
-                hidden_states = \
-                (aug_model.encoder_out_ratio * encoder_out_copy) + (aug_model.latent_out_ratio * latent_out_copy.unsqueeze(1))
-                hidden_states_copy = hidden_states.clone().detach().requires_grad_(True)
+            #
+            eps_dict['eps_0'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
+            prob_dict['eps_0'] = F.softmax(classifier_out)
 
-            with torch.no_grad():
-                recon_out = aug_model(input_ids=src_sequence, attention_mask=src_att, 
-                                    hidden_states=hidden_states_copy)
-                origin_output = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
+            # Iterative Latent Encoding
+            encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
+            latent_out_copy, _ = model.latent_encode(encoder_out=encoder_out_copy)
 
-            classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
-            original_classy_out = F.softmax(classifier_out)
+            classifier_out = model.classify(latent_out=latent_out_copy)
             cls_loss = cls_criterion(classifier_out, trg_label)
-            aug_model.zero_grad()
+            model.zero_grad()
             cls_loss.backward()
-            hidden_states_copy_grad = hidden_states_copy.grad.data
+            latent_out_copy_grad = latent_out_copy.grad.data
 
             for epsilon in [2, 5, 8]:
-                hidden_states_copy = hidden_states_copy - ((epsilon * 1) * hidden_states_copy_grad)
+                latent_out_copy = latent_out_copy - ((epsilon * 0.9) * latent_out_copy_grad)
 
                 with torch.no_grad():
-                    recon_out = aug_model.generate(src_input_ids=src_sequence, src_attention_mask=src_att,
-                                                   latent_z=hidden_states_copy)
+                    recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
 
                 # Augmenting
-                eps_dict[f'eps_{epsilon}'] = aug_model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
+                eps_dict[f'eps_{epsilon}'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
 
                 with torch.no_grad():
                     inp_dict = aug_model.tokenizer(eps_dict[f'eps_{epsilon}'],
@@ -384,16 +410,17 @@ def augmenter_training(args):
                     classifier_out = aug_model.classify(hidden_states=hidden_states_copy)
                     prob_dict[f'eps_{epsilon}'] = F.softmax(classifier_out)
 
-        write_log(logger, 'Generated Examples')
-        write_log(logger, f'Source: {src_output}')
-        write_log(logger, f'Source Probability: {original_classy_out[0]}')
-        write_log(logger, f'Augmented_origin: {origin_output}')
-        write_log(logger, f'Augmented_2: {eps_dict["eps_2"]}')
-        write_log(logger, f'Augmented_2_prob: {prob_dict["eps_2"]}')
-        write_log(logger, f'Augmented_5: {eps_dict["eps_5"]}')
-        write_log(logger, f'Augmented_5_prob: {prob_dict["eps_5"]}')
-        write_log(logger, f'Augmented_8: {eps_dict["eps_8"]}')
-        write_log(logger, f'Augmented_8_prob: {prob_dict["eps_8"]}')
+            write_log(logger, f'Generated Examples')
+            write_log(logger, f'Phase: {phase}')
+            write_log(logger, f'Source: {src_output}')
+            write_log(logger, f'Source Probability: {original_classy_out[0]}')
+            write_log(logger, f'Augmented_origin: {origin_output}')
+            write_log(logger, f'Augmented_2: {eps_dict["eps_2"]}')
+            write_log(logger, f'Augmented_2_prob: {prob_dict["eps_2"]}')
+            write_log(logger, f'Augmented_5: {eps_dict["eps_5"]}')
+            write_log(logger, f'Augmented_5_prob: {prob_dict["eps_5"]}')
+            write_log(logger, f'Augmented_8: {eps_dict["eps_8"]}')
+            write_log(logger, f'Augmented_8_prob: {prob_dict["eps_8"]}')
 
     # 3) Results
     write_log(logger, f'Best AUG Epoch: {best_aug_epoch}')
