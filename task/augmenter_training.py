@@ -353,10 +353,9 @@ def augmenter_training(args):
             trg_label = torch.flip(trg_label, dims=[1]).to(device)
 
             # Original Reconstruction
-            with torch.no_grad():
-                encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-                latent_out, _ = model.latent_encode(encoder_out=encoder_out)
-                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
+            encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+            latent_out, _ = model.latent_encode(encoder_out=encoder_out)
+            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
             # Reconstruction Output Tokenizing & Pre-processing
             eps_dict['eps_0'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
@@ -382,7 +381,7 @@ def augmenter_training(args):
             latent_out_copy_grad = latent_out_copy.grad.data
 
             for epsilon in [2, 5, 8]:
-                latent_out_copy = latent_out_copy - ((epsilon * 3) * latent_out_copy_grad)
+                latent_out_copy = latent_out_copy - ((epsilon * 20) * latent_out_copy_grad)
 
                 with torch.no_grad():
                     recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)

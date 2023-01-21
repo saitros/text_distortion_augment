@@ -104,7 +104,7 @@ class TransformerModel(nn.Module):
             input_ids, self.pad_idx, self.decoder_start_token_id
         )
 
-        hidden_states = encoder_out + latent_out.unsqueeze(1).expand(-1, seq_len, -1) # 이거 애매
+        hidden_states = torch.add((0.3 * encoder_out), (0.7 * latent_out.unsqueeze(1))) # 이거 애매
         
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
