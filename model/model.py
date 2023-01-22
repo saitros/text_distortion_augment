@@ -156,7 +156,7 @@ class ClassifierModel(nn.Module):
         # encoder_out = encoder_out.mean(dim=1)
         out = self.dropout(self.leaky_relu(self.linear1(hidden_state)))
         out = self.dropout(self.leaky_relu(self.linear2(out)))
-        out = self.linear3(out).max(dim=1)[0]
+        out = self.linear3(out)
 
         return out
 
