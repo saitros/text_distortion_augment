@@ -349,7 +349,7 @@ def augmenter_training2(args):
             write_log(logger, f'Augmented_8_prob: {prob_dict["eps_8"]}')
 
     # 3) Results
-    write_log(logger, f'Best AUG Epoch: {best_aug_epoch}')
-    write_log(logger, f'Best AUG Loss: {round(best_aug_val_loss.item(), 2)}')
+    # write_log(logger, f'Best AUG Epoch: {best_aug_epoch}')
+    # write_log(logger, f'Best AUG Loss: {round(best_aug_val_loss.item(), 2)}')
     write_log(logger, f'Best CLS Epoch: {best_cls_epoch}')
     write_log(logger, f'Best CLS Loss: {round(best_cls_val_loss.item(), 2)}')
