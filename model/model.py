@@ -82,7 +82,7 @@ class TransformerModel(nn.Module):
         return encoder_out
 
     def latent_encode(self, encoder_out):
-        latent_out = encoder_out.mean(dim=1) # (batch_size, d_hidden)
+        latent_out, _ = encoder_out.max(dim=1) # (batch_size, d_hidden)
         latent_encoder_out = self.latent_encoder(latent_out) # (batch_size, d_embedding)
         latent_decoder_out = self.latent_decoder(latent_encoder_out) # (batch_size, d_hidden)
 
@@ -146,17 +146,24 @@ class ClassifierModel(nn.Module):
     def __init__(self, d_latent, num_labels: int = 2, dropout: float = 0.3):
         super().__init__()
 
-        self.linear1 = nn.Linear(d_latent, 512)
-        self.linear2 = nn.Linear(512, 256)
-        self.linear3 = nn.Linear(256, num_labels)
+        self.linear1 = nn.Linear(d_latent, 768)
+        self.linear2 = nn.Linear(768, 768)
+        self.linear3 = nn.Linear(768, 512)
+        self.linear4 = nn.Linear(512, 256)
+        self.linear5 = nn.Linear(256, num_labels)
         self.dropout = nn.Dropout(dropout)
         self.leaky_relu = nn.LeakyReLU(0.1)
 
     def forward(self, hidden_state):
         # encoder_out = encoder_out.mean(dim=1)
+        # out = self.dropout(self.leaky_relu(self.linear1(hidden_state)))
+        # out = self.dropout(self.leaky_relu(self.linear2(out)))
+        # out = self.linear3(out)
         out = self.dropout(self.leaky_relu(self.linear1(hidden_state)))
         out = self.dropout(self.leaky_relu(self.linear2(out)))
-        out = self.linear3(out)
+        out = self.dropout(self.leaky_relu(self.linear3(out)))
+        out = self.dropout(self.leaky_relu(self.linear4(out)))
+        out = self.linear5(out)
 
         return out
 

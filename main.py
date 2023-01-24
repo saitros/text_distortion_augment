@@ -5,6 +5,7 @@ import argparse
 from task.preprocessing import preprocessing
 from task.augmenter_training import augmenter_training
 from task.augmenter_training2 import augmenter_training2
+from task.augmenter_training3 import augmenter_training3
 from task.augmenting import augmenting
 # from task.testing import testing
 # Utils
@@ -25,6 +26,8 @@ def main(args):
         augmenter_training(args)
     elif args.augmenter_training2:
         augmenter_training2(args)
+    elif args.augmenter_training3:
+        augmenter_training3(args)
 
     if args.augmenting:
         augmenting(args)
@@ -41,6 +44,7 @@ if __name__=='__main__':
     parser.add_argument('--preprocessing', action='store_true')
     parser.add_argument('--augmenter_training', action='store_true')
     parser.add_argument('--augmenter_training2', action='store_true')
+    parser.add_argument('--augmenter_training3', action='store_true')
     parser.add_argument('--augmenting', action='store_true')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--debuging_mode', action='store_true')
