@@ -173,7 +173,8 @@ def augmenter_training(args):
             # Classifier
             classifier_out = model.classify(latent_out=latent_out)
             cls_loss = cls_criterion(classifier_out, trg_label)
-            mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+            # mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+            mmd_loss = torch.tensor(0)
 
             # Loss Backward
             total_cls_loss = cls_loss + mmd_loss

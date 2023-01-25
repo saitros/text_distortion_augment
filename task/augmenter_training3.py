@@ -276,7 +276,9 @@ def augmenter_training3(args):
                 latent_out, _ = model.latent_encode(encoder_out=encoder_out)
 
             # Reconstruction
-            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
+            encoder_out_copy = encoder_out.clone().detach()
+            latent_out_copy = latent_out.clone().detach()
+            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
             # Loss Backward

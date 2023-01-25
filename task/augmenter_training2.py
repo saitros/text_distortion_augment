@@ -174,7 +174,8 @@ def augmenter_training2(args):
             # Reconstruction
             recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
-            mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+            # mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+            mmd_loss = torch.tensor(0)
 
             # Loss Backward
             aug_optimizer.zero_grad(set_to_none=True)
