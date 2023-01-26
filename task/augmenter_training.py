@@ -433,7 +433,6 @@ def augmenter_training(args):
             #         prob_dict[f'eps_{epsilon}'] = F.softmax(classifier_out)
             
             dict_key = prob_dict.keys()
-            print(dict_key)
             
             write_log(logger, f'Generated Examples')
             write_log(logger, f'Phase: {phase}')
