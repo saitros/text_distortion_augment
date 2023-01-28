@@ -374,13 +374,14 @@ def augmenter_training(args):
             encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
             latent_out_copy, _ = model.latent_encode(encoder_out=encoder_out_copy)
             latent_out_copy.retain_grad()
+            latent_out_copy_grad = latent_out_copy.grad.data
 
-            for i in range(e_step):
+            for i in range(20): # Need to fix
 
                 # fixed epsilon methods
                 epsilon = 2.0
 
-                latent_out_copy = latent_out_copy - ((epsilon * 20) * latent_out_copy_grad)
+                latent_out_copy = latent_out_copy - ((epsilon * 0.9) * latent_out_copy_grad)
 
                 with torch.no_grad():
                     recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
