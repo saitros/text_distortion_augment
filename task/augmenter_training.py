@@ -374,6 +374,12 @@ def augmenter_training(args):
             encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
             latent_out_copy, _ = model.latent_encode(encoder_out=encoder_out_copy)
             latent_out_copy.retain_grad()
+            
+            classifier_out = model.classify(latent_out=latent_out_copy)
+            cls_loss = cls_criterion(classifier_out, trg_label)
+            model.zero_grad()
+            cls_loss.backward()
+            
             latent_out_copy_grad = latent_out_copy.grad.data
 
             for i in range(20): # Need to fix
