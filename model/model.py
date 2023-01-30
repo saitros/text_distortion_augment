@@ -162,7 +162,7 @@ class TransformerModel(nn.Module):
             decoder_outputs = self.decoder(
                 input_ids=seqs,
                 encoder_hidden_states=hidden_states,
-                encoder_attention_mask=attention_mask
+                encoder_attention_mask=src_key_padding_mask
             )
             decoder_outputs = decoder_outputs['last_hidden_state']
 
