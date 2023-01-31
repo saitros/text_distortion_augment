@@ -82,7 +82,7 @@ class TransformerModel(nn.Module):
         return encoder_out
 
     def latent_encode(self, encoder_out):
-        latent_out = encoder_out.sum(dim=1) # (batch_size, d_hidden)
+        latent_out, _ = encoder_out.max(dim=1) # (batch_size, d_hidden)
         latent_encoder_out = self.latent_encoder(latent_out) # (batch_size, d_embedding)
         latent_decoder_out = self.latent_decoder(latent_encoder_out) # (batch_size, d_hidden)
 
@@ -104,7 +104,7 @@ class TransformerModel(nn.Module):
             input_ids, self.pad_idx, self.decoder_start_token_id
         )
 
-        hidden_states = torch.add((0.5 * encoder_out), (0.5 * latent_out.unsqueeze(1))) # 이거 애매
+        hidden_states = torch.add((0.3 * encoder_out), (0.7 * latent_out.unsqueeze(1))) # 이거 애매
         
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
@@ -131,12 +131,12 @@ class TransformerModel(nn.Module):
         encoder_out = encoder_out['last_hidden_state']
 
         # Latent Encoding
-        latent_out = encoder_out.sum(dim=1) # (batch_size, d_hidden)
+        latent_out, _ = encoder_out.max(dim=1) # (batch_size, d_hidden)
         latent_encoder_out = self.latent_encoder(latent_out) # (batch_size, d_embedding)
         latent_decoder_out = self.latent_decoder(latent_encoder_out) # (batch_size, d_hidden)
 
         # Total Hidden States
-        hidden_states = torch.add((0.5 * encoder_out), (0.5 * latent_out.unsqueeze(1)))
+        hidden_states = torch.add((0.3 * encoder_out), (0.7 * latent_out.unsqueeze(1)))
 
         # Expanding
         src_key_padding_mask = attention_mask.view(batch_size, 1, -1)
