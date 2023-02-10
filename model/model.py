@@ -90,6 +90,7 @@ class TransformerModel(nn.Module):
 
     def classify(self, latent_out):
 
+        latent_out = latent_out.sum(dim=1)
         classifier_out = self.dropout(self.leaky_relu(self.classifier1(latent_out)))
         classifier_out = self.dropout(self.leaky_relu(self.classifier2(classifier_out)))
         classifier_out = self.classifier3(classifier_out)
@@ -104,7 +105,7 @@ class TransformerModel(nn.Module):
             input_ids, self.pad_idx, self.decoder_start_token_id
         )
 
-        hidden_states = torch.add((0.3 * encoder_out), (0.7 * latent_out.unsqueeze(1))) # 이거 애매
+        hidden_states = torch.add((1.0 * encoder_out), (0 * latent_out.unsqueeze(1))) # 이거 애매
         
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
@@ -136,7 +137,7 @@ class TransformerModel(nn.Module):
         latent_decoder_out = self.latent_decoder(latent_encoder_out) # (batch_size, d_hidden)
 
         # Total Hidden States
-        hidden_states = torch.add((0.3 * encoder_out), (0.7 * latent_out.unsqueeze(1)))
+        hidden_states = torch.add((1.0 * encoder_out), (0 * latent_out.unsqueeze(1)))
 
         # Expanding
         src_key_padding_mask = attention_mask.view(batch_size, 1, -1)

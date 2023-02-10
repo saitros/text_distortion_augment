@@ -171,10 +171,10 @@ def augmenter_training(args):
             latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
 
             # Classifier
-            classifier_out = model.classify(latent_out=latent_out)
+            classifier_out = model.classify(latent_out=encoder_out)
             cls_loss = cls_criterion(classifier_out, trg_label)
-            # mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
-            mmd_loss = torch.tensor(0)
+            mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+            # mmd_loss = torch.tensor(0)
 
             # Loss Backward
             total_cls_loss = cls_loss + mmd_loss
@@ -210,7 +210,7 @@ def augmenter_training(args):
                 latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
 
                 # Classifier
-                classifier_out = model.classify(latent_out=latent_out)
+                classifier_out = model.classify(latent_out=encoder_out)
                 cls_loss = cls_criterion(classifier_out, trg_label)
                 mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
 
@@ -367,7 +367,7 @@ def augmenter_training(args):
                 encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device), 
                                                  attention_mask=inp_dict['attention_mask'].to(device))
                 latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
-                classifier_out = model.classify(latent_out=latent_out_eps_0)
+                classifier_out = model.classify(latent_out=encoder_out_eps_0)
             prob_dict['eps_0'] = F.softmax(classifier_out)
 
             # Iterative Latent Encoding
@@ -375,19 +375,19 @@ def augmenter_training(args):
             latent_out_copy, _ = model.latent_encode(encoder_out=encoder_out_copy)
             latent_out_copy.retain_grad()
             
-            classifier_out = model.classify(latent_out=latent_out_copy)
+            classifier_out = model.classify(latent_out=encoder_out_copy)
             cls_loss = cls_criterion(classifier_out, trg_label)
             model.zero_grad()
             cls_loss.backward()
             
-            latent_out_copy_grad = latent_out_copy.grad.data
+            encoder_out_copy_grad = encoder_out_copy.grad.data
 
             for i in range(20): # Need to fix
 
                 # fixed epsilon methods
                 epsilon = 2.0
 
-                latent_out_copy = latent_out_copy - ((epsilon * 0.9) * latent_out_copy_grad)
+                encoder_out_copy = encoder_out_copy - ((epsilon * 0.9) * encoder_out_copy_grad)
 
                 with torch.no_grad():
                     recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
@@ -406,7 +406,7 @@ def augmenter_training(args):
                 encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
                 latent_out_copy, _ = model.latent_encode(encoder_out=encoder_out_copy)
                 latent_out_copy.retain_grad()
-                classifier_out = model.classify(latent_out=latent_out_copy)
+                classifier_out = model.classify(latent_out=encoder_out_copy)
                 prob_dict[f'eps_{epsilon*i}'] = F.softmax(classifier_out)
                 
                 cls_loss = cls_criterion(classifier_out, trg_label)
@@ -437,16 +437,17 @@ def augmenter_training(args):
             #         classifier_out = model.classify(latent_out=latent_out)
             #         prob_dict[f'eps_{epsilon}'] = F.softmax(classifier_out)
             
-            # dict_key = prob_dict.keys()
+            dict_key = prob_dict.keys()
             
-            # write_log(logger, f'Generated Examples')
-            # write_log(logger, f'Phase: {phase}')
-            # write_log(logger, f'Source: {src_output}')
-            # write_log(logger, f'Source Probability: {prob_dict["eps_0"]}')
-            # write_log(logger, f'Augmented_origin: {eps_dict["eps_0"]}')
-            # for k in dict_key:
-            #     if k in [10, 20]:
-            #         write_log(logger, f'Augmented_{k}: {eps_dict[k]}')
+            write_log(logger, f'Generated Examples')
+            write_log(logger, f'Phase: {phase}')
+            write_log(logger, f'Source: {src_output}')
+            write_log(logger, f'Source Probability: {prob_dict["eps_0"]}')
+            write_log(logger, f'Augmented_origin: {eps_dict["eps_0"]}')
+            for k in dict_key:
+                if k in [10, 20]:
+                    write_log(logger, f'Augmented_{k}: {eps_dict[k]}')
+                    write_log(logger, f'Probability: {prob_dict[k]}')
 #             write_log(logger, f'Augmented_2: {eps_dict["eps_2"]}')
 #             write_log(logger, f'Augmented_2_prob: {prob_dict["eps_2"]}')
 #             write_log(logger, f'Augmented_5: {eps_dict["eps_5"]}')
