@@ -19,13 +19,13 @@ class TransformerModel(nn.Module):
 
         """
         Initialize WAE model
-        
+
         Args:
             encoder_config (dictionary): encoder transformer's configuration
             d_latent (int): latent dimension size
-            device (torch.device): 
+            device (torch.device):
         Returns:
-            log_prob (torch.Tensor): log probability of each word 
+            log_prob (torch.Tensor): log probability of each word
             mean (torch.Tensor): mean of latent vector
             log_var (torch.Tensor): log variance of latent vector
             z (torch.Tensor): sampled latent vector
@@ -76,7 +76,7 @@ class TransformerModel(nn.Module):
             self.eos_idx = self.tokenizer.eos_token_id
 
     def encode(self, input_ids, attention_mask):
-        encoder_out = self.encoder(input_ids=input_ids, 
+        encoder_out = self.encoder(input_ids=input_ids,
                                    attention_mask=attention_mask)
         encoder_out = encoder_out['last_hidden_state']
 
@@ -110,7 +110,7 @@ class TransformerModel(nn.Module):
 
         # hidden_states = torch.add((1.0 * encoder_out), (0 * latent_out.unsqueeze(1))) # 이거 애매
         hidden_states = encoder_out
-        
+
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
             encoder_hidden_states=hidden_states,
@@ -149,7 +149,7 @@ class TransformerModel(nn.Module):
         complete_ind = set()
 
         # Decoding start token setting
-        seqs = torch.tensor([[self.decoder_start_token_id]], dtype=torch.long, device=device) 
+        seqs = torch.tensor([[self.decoder_start_token_id]], dtype=torch.long, device=device)
         seqs = seqs.repeat(beam_size * batch_size, 1).contiguous() # (batch_size * k, 1)
 
         for step in range(self.src_max_len):
@@ -221,6 +221,49 @@ class TransformerModel(nn.Module):
         ind_expand = ind.view(-1) + every_batch
         predicted = [complete_seqs[i] for i in ind_expand.tolist()]
         return predicted
+
+    def generate_topk(self, encoder_out, attention_mask, device, topk=5, softmax_temp=5.0):
+        # BART decoder start token
+        seqs = torch.tensor([[self.decoder_start_token_id]], dtype=torch.long, device=device)
+        hidden_states = encoder_out
+
+        # Generate sentence
+        for step in range(self.src_max_len):
+            decoder_outputs = self.decoder(
+                input_ids=seqs,
+                encoder_hidden_states=hidden_states,
+                encoder_attention_mask=attention_mask
+            )
+            decoder_outputs = decoder_outputs['last_hidden_state'] # (batch_size, seq_len, d_embedding)
+
+            # Score calculate
+            scores = F.gelu(self.decoder_linear(decoder_outputs)) # (batch_size, seq_len, d_embedding)
+            scores = self.decoder_augmenter(self.decoder_norm(scores)) # (batch_size, seq_len, vocab_num)
+            next_token_logits = scores[:, -1, :] # (batch_size, vocab_num)
+
+            # Avoid generating <pad> and <s> token
+            next_token_logits[:, self.pad_idx] = float('-inf')
+            next_token_logits[:, self.bos_idx] = float('-inf')
+
+            # Apply softmax temperature to logits
+            next_token_logits = next_token_logits / softmax_temp
+            next_token_prob = F.softmax(next_token_logits, dim=-1) # (batch_size, vocab_num)
+
+            # Get topk token
+            topk_prob, topk_idx = torch.topk(next_token_prob, topk, dim=-1) # (batch_size, topk)
+            topk_prob = topk_prob / torch.sum(topk_prob.sum(dim=-1, keepdim=True)) # (batch_size, topk) - normalize probability to sum 1
+            next_token_idx = torch.multinomial(topk_prob, 1).squeeze(1) # (batch_size) - sample token from topk token
+            next_token = topk_idx[torch.arange(topk_idx.size(0)), next_token_idx] # (batch_size)
+
+            # Concatenate generated token to sequence
+            next_token = next_token.unsqueeze(1) # (batch_size, 1)
+            seqs = torch.cat([seqs, next_token], dim=1) # (batch_size, seq_len + 1)
+
+            # If <eos> token is generated, stop generating
+            if self.eos_idx in next_token:
+                break
+
+        return seqs
 
 class ClassifierModel(nn.Module):
     def __init__(self, d_latent, num_labels: int = 2, dropout: float = 0.3):
