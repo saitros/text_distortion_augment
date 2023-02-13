@@ -105,7 +105,7 @@ def augmenter_training(args):
                             batch_size=args.batch_size, shuffle=True,
                             pin_memory=True, num_workers=args.num_workers),
         'valid': DataLoader(dataset_dict['valid'], drop_last=False,
-                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                            batch_size=args.batch_size, shuffle=True, pin_memory=True,
                             num_workers=args.num_workers)
     }
     write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
@@ -168,13 +168,13 @@ def augmenter_training(args):
 
             # Encoding
             encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-            latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+            # latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
 
             # Classifier
-            classifier_out = model.classify(latent_out=encoder_out)
+            classifier_out = model.classify(hidden_states=encoder_out)
             cls_loss = cls_criterion(classifier_out, trg_label)
-            mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
-            # mmd_loss = torch.tensor(0)
+            # mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+            mmd_loss = torch.tensor(0)
 
             # Loss Backward
             total_cls_loss = cls_loss + mmd_loss
@@ -207,12 +207,13 @@ def augmenter_training(args):
         
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                # latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
 
                 # Classifier
-                classifier_out = model.classify(latent_out=encoder_out)
+                classifier_out = model.classify(hidden_states=encoder_out)
                 cls_loss = cls_criterion(classifier_out, trg_label)
-                mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+                # mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+                mmd_loss = torch.tensor(0)
 
             # Loss and Accuracy Check
             val_acc += (classifier_out.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
@@ -222,7 +223,7 @@ def augmenter_training(args):
             if args.debuging_mode:
                 break
 
-        val_mmd_loss /= len(dataloader_dict['valid'])
+        # val_mmd_loss /= len(dataloader_dict['valid'])
         val_cls_loss /= len(dataloader_dict['valid'])
         val_acc /= len(dataloader_dict['valid'])
         write_log(logger, 'Classifier Validation MMD Loss: %3.3f' % val_mmd_loss)
@@ -264,10 +265,10 @@ def augmenter_training(args):
             # Encoding
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-                latent_out, _ = model.latent_encode(encoder_out=encoder_out)
+                # latent_out, _ = model.latent_encode(encoder_out=encoder_out)
 
             # Reconstruction
-            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
+            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out)
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
             # Loss Backward
@@ -304,9 +305,8 @@ def augmenter_training(args):
             # Encoding
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-                latent_out, _ = model.latent_encode(encoder_out=encoder_out)
-                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
-                recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
+                # latent_out, _ = model.latent_encode(encoder_out=encoder_out)
+                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out)
 
                 # Reconstruction Loss
                 recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
@@ -366,29 +366,29 @@ def augmenter_training(args):
             with torch.no_grad():
                 encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device), 
                                                  attention_mask=inp_dict['attention_mask'].to(device))
-                latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
-                classifier_out = model.classify(latent_out=encoder_out_eps_0)
+                # latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
+                classifier_out = model.classify(hidden_states=encoder_out_eps_0)
             prob_dict['eps_0'] = F.softmax(classifier_out)
 
-            # Iterative Latent Encoding
-            encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-            latent_out_copy, _ = model.latent_encode(encoder_out=encoder_out_copy)
-            latent_out_copy.retain_grad()
+            # # Iterative Latent Encoding
+            # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
+            # latent_out_copy, _ = model.latent_encode(encoder_out=encoder_out_copy)
+            # latent_out_copy.retain_grad()
             
-            classifier_out = model.classify(latent_out=encoder_out_copy)
-            cls_loss = cls_criterion(classifier_out, trg_label)
-            model.zero_grad()
-            cls_loss.backward()
+            # classifier_out = model.classify(latent_out=encoder_out_copy)
+            # cls_loss = cls_criterion(classifier_out, trg_label)
+            # model.zero_grad()
+            # cls_loss.backward()
             
-            encoder_out_copy_grad = encoder_out_copy.grad.data
-            encoder_out_copy_grad = encoder_out_copy_grad.sign()
+            # encoder_out_copy_grad = encoder_out_copy.grad.data
+            # encoder_out_copy_grad = encoder_out_copy_grad.sign()
 
             # for i in range(51): # Need to fix
 
             #     # fixed epsilon methods
-            #     epsilon = 2.0
+            #     epsilon = 0.8
 
-            #     encoder_out_copy = encoder_out_copy - ((epsilon * 0.9) * encoder_out_copy_grad)
+            #     encoder_out_copy = encoder_out_copy - ((epsilon * 1.0) * encoder_out_copy_grad)
 
             #     with torch.no_grad():
             #         recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
@@ -415,28 +415,29 @@ def augmenter_training(args):
             #     model.zero_grad()
             #     cls_loss.backward()
             #     encoder_out_copy_grad = encoder_out_copy.grad.data
+            #     encoder_out_copy_grad = encoder_out_copy_grad.sign()
 
             # Previous code
-            for epsilon in [2, 5, 8, 10, 15, 20, 30]:
-                epsilon_float = epsilon * 0.01
-                encoder_out_copy = encoder_out_copy - ((encoder_out_copy * 1.0) * encoder_out_copy_grad)
+            # for epsilon in [2, 5, 8, 10, 15, 20, 30]:
+            #     epsilon_float = epsilon * 0.01
+            #     encoder_out_copy = encoder_out_copy - ((encoder_out_copy * 1.0) * encoder_out_copy_grad)
 
-                with torch.no_grad():
-                    recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
+            #     with torch.no_grad():
+            #         recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
 
-                # Augmenting
-                eps_dict[f'eps_{epsilon}'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
+            #     # Augmenting
+            #     eps_dict[f'eps_{epsilon}'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
 
-                with torch.no_grad():
-                    inp_dict = model.tokenizer(eps_dict[f'eps_{epsilon}'],
-                                                   max_length=args.src_max_len,
-                                                   padding='max_length',
-                                                   truncation=True,
-                                                   return_tensors='pt')
-                    encoder_out = model.encode(input_ids=inp_dict['input_ids'].to(device), attention_mask=inp_dict['attention_mask'].to(device))
-                    latent_out, _ = model.latent_encode(encoder_out=encoder_out)
-                    classifier_out = model.classify(latent_out=encoder_out)
-                    prob_dict[f'eps_{epsilon}'] = F.softmax(classifier_out)
+            #     with torch.no_grad():
+            #         inp_dict = model.tokenizer(eps_dict[f'eps_{epsilon}'],
+            #                                        max_length=args.src_max_len,
+            #                                        padding='max_length',
+            #                                        truncation=True,
+            #                                        return_tensors='pt')
+            #         encoder_out = model.encode(input_ids=inp_dict['input_ids'].to(device), attention_mask=inp_dict['attention_mask'].to(device))
+            #         latent_out, _ = model.latent_encode(encoder_out=encoder_out)
+            #         classifier_out = model.classify(latent_out=encoder_out)
+            #         prob_dict[f'eps_{epsilon}'] = F.softmax(classifier_out)
             
             dict_key = prob_dict.keys()
             
@@ -445,10 +446,10 @@ def augmenter_training(args):
             write_log(logger, f'Source: {src_output}')
             write_log(logger, f'Source Probability: {prob_dict["eps_0"]}')
             write_log(logger, f'Augmented_origin: {eps_dict["eps_0"]}')
-            for k in dict_key:
-                if k in ['eps_2', 'eps_5', 'eps_8', 'eps_20']:
-                    write_log(logger, f'Augmented_{k}: {eps_dict[k]}')
-                    write_log(logger, f'Probability_{k}: {prob_dict[k]}')
+            # for k in dict_key:
+            #     if k in ['eps_5', 'eps_10', 'eps_20', 'eps_30']:
+            #         write_log(logger, f'Augmented_{k}: {eps_dict[k]}')
+            #         write_log(logger, f'Probability_{k}: {prob_dict[k]}')
 #             write_log(logger, f'Augmented_2: {eps_dict["eps_2"]}')
 #             write_log(logger, f'Augmented_2_prob: {prob_dict["eps_2"]}')
 #             write_log(logger, f'Augmented_5: {eps_dict["eps_5"]}')

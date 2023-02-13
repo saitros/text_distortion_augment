@@ -4,8 +4,6 @@ import argparse
 # Import custom modules
 from task.preprocessing import preprocessing
 from task.augmenter_training import augmenter_training
-from task.augmenter_training2 import augmenter_training2
-from task.augmenter_training3 import augmenter_training3
 from task.augmenting import augmenting
 # from task.testing import testing
 # Utils
@@ -24,10 +22,6 @@ def main(args):
 
     if args.augmenter_training:
         augmenter_training(args)
-    elif args.augmenter_training2:
-        augmenter_training2(args)
-    elif args.augmenter_training3:
-        augmenter_training3(args)
 
     if args.augmenting:
         augmenting(args)

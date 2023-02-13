@@ -1,4 +1,5 @@
 import math
+from collections import defaultdict
 # Import PyTorch
 import torch
 import torch.nn as nn
@@ -82,22 +83,24 @@ class TransformerModel(nn.Module):
         return encoder_out
 
     def latent_encode(self, encoder_out):
-        latent_out, _ = encoder_out.max(dim=1) # (batch_size, d_hidden)
+        latent_out = encoder_out.sum(dim=1) # (batch_size, d_hidden)
         latent_encoder_out = self.latent_encoder(latent_out) # (batch_size, d_embedding)
         latent_decoder_out = self.latent_decoder(latent_encoder_out) # (batch_size, d_hidden)
 
         return latent_decoder_out, latent_encoder_out
 
-    def classify(self, latent_out):
+    def classify(self, hidden_states):
 
-        latent_out = latent_out.sum(dim=1)
-        classifier_out = self.dropout(self.leaky_relu(self.classifier1(latent_out)))
-        classifier_out = self.dropout(self.leaky_relu(self.classifier2(classifier_out)))
-        classifier_out = self.classifier3(classifier_out)
+        if hidden_states.dim() == 3:
+            hidden_states = hidden_states.sum(dim=1) # (batch_size, d_hidden)
+
+        classifier_out = self.dropout(self.leaky_relu(self.classifier1(hidden_states))) # (batch_size, d_embedding)
+        classifier_out = self.dropout(self.leaky_relu(self.classifier2(classifier_out))) # (batch_size, d_embedding)
+        classifier_out = self.classifier3(classifier_out) # (batch_size, n_class)
 
         return classifier_out
 
-    def forward(self, input_ids, attention_mask, encoder_out, latent_out):
+    def forward(self, input_ids, attention_mask, encoder_out, latent_out=None):
 
         seq_len = input_ids.size(1)
 
@@ -105,39 +108,30 @@ class TransformerModel(nn.Module):
             input_ids, self.pad_idx, self.decoder_start_token_id
         )
 
-        hidden_states = torch.add((1.0 * encoder_out), (0 * latent_out.unsqueeze(1))) # 이거 애매
+        # hidden_states = torch.add((1.0 * encoder_out), (0 * latent_out.unsqueeze(1))) # 이거 애매
+        hidden_states = encoder_out
         
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
             encoder_hidden_states=hidden_states,
             encoder_attention_mask=attention_mask
         )
-        decoder_outputs = decoder_outputs['last_hidden_state']
+        decoder_outputs = decoder_outputs['last_hidden_state'] # (batch_size, seq_len, d_hidden)
 
         decoder_outputs = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
         decoder_outputs = self.decoder_augmenter(self.decoder_norm(decoder_outputs))
 
         return decoder_outputs
 
-    def generate(self, input_ids, attention_mask, beam_size, beam_alpha, repetition_penalty, device):
+    def generate(self, encoder_out, attention_mask, beam_size, beam_alpha, repetition_penalty, device):
         # Input, output setting
         batch_size = input_ids.size(0)
         src_seq_size = input_ids.size(1)
         encoder_out_dict = defaultdict(list)
         every_batch = torch.arange(0, beam_size * batch_size, beam_size, device=device)
 
-        # Encoding
-        encoder_out = self.encoder(input_ids=input_ids, 
-                                   attention_mask=attention_mask)
-        encoder_out = encoder_out['last_hidden_state']
-
-        # Latent Encoding
-        latent_out, _ = encoder_out.max(dim=1) # (batch_size, d_hidden)
-        latent_encoder_out = self.latent_encoder(latent_out) # (batch_size, d_embedding)
-        latent_decoder_out = self.latent_decoder(latent_encoder_out) # (batch_size, d_hidden)
-
         # Total Hidden States
-        hidden_states = torch.add((1.0 * encoder_out), (0 * latent_out.unsqueeze(1)))
+        hidden_states = encoder_out # Need to fix
 
         # Expanding
         src_key_padding_mask = attention_mask.view(batch_size, 1, -1)
