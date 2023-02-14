@@ -162,7 +162,7 @@ class TransformerModel(nn.Module):
             decoder_outputs = decoder_outputs['last_hidden_state']
 
             # Score calculate
-            scores = F.gelu(self.decoder_linear(decoder_out[-1])) # (batch_size * k, d_embedding)
+            scores = F.gelu(self.decoder_linear(decoder_outputs[:,-1])) # (batch_size * k, d_embedding)
             scores = self.decoder_augmenter(self.decoder_norm(scores)) # (batch_size * k, vocab_num)
             scores = F.log_softmax(scores, dim=1) # (batch_size * k, vocab_num)
 
