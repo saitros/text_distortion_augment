@@ -70,6 +70,18 @@ def training(args):
         else:
             train_src_token_type_ids = list()
             valid_src_token_type_ids = list()
+
+    if args.train_with_aug:
+        aug_train_src_input_ids = f.get('train_src_input_ids')[:]
+        train_src_input_ids = np.concatenate((train_src_input_ids, aug_train_src_input_ids), axis=0)
+        aug_train_src_attention_mask = f.get('train_src_attention_mask')[:]
+        train_src_attention_mask = np.concatenate((train_src_input_ids, aug_train_src_input_ids), axis=0)
+        aug_train_trg_list = f.get('train_label')[:]
+        aug_train_trg_list = F.one_hot(torch.tensor(aug_train_trg_list, dtype=torch.long)).numpy()
+        train_trg_list = np.concatenate((train_trg_list, aug_train_trg_list), axis=0)
+        if args.model_type == 'bert':
+            aug_train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
+            train_src_token_type_ids = np.concatenate((train_src_token_type_ids, aug_train_src_token_type_ids), axis=0)
         
     with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
         data_ = pickle.load(f)
@@ -87,12 +99,8 @@ def training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    aug_model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len,
-                                 isPreTrain=args.isPreTrain, dropout=args.dropout,
-                                 encoder_out_ratio=args.encoder_out_ratio)
-    cls_model = ClassifierModel(d_latent=aug_model.d_hidden, num_labels=num_labels, dropout=args.dropout)
-    aug_model.to(device)
-    cls_model.to(device)
+    model
+    model.to(device)
 
     # 2) Dataloader setting
     dataset_dict = {

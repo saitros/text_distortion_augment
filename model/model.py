@@ -13,8 +13,11 @@ from utils import return_model_name
 from model.utils import model_setting
 
 class TransformerModel(nn.Module):
-    def __init__(self, model_type: str = 'bart', src_max_len: int = 150,
-                 isPreTrain: bool = True, num_labels: int = 2, dropout: float = 0.3):
+    def __init__(self, model_type: str = 'bart', isPreTrain: bool = True, 
+                 encoder_out_ratio: float = 0.5, encoder_out_cross_attention: bool = True,
+                 encoder_out_to_augmenter: bool = True,
+                 src_max_len: int = 150, num_labels: int = 2,
+                 dropout: float = 0.3):
         super().__init__()
 
         """
@@ -33,9 +36,17 @@ class TransformerModel(nn.Module):
         self.isPreTrain = isPreTrain
         self.src_max_len = src_max_len
         self.dropout = nn.Dropout(dropout)
-        self.model_type = model_type
 
+        self.encoder_out_cross_attention = encoder_out_cross_attention
+        self.encoder_out_to_augmenter = encoder_out_to_augmenter
+
+        # Ratio setting
+        assert encoder_out_ratio <= 1.0
+        self.encoder_out_ratio = encoder_out_ratio
+        self.latent_out_ratio = 1.0 - encoder_out_ratio
+        
         # Model setting
+        self.model_type = model_type
         model_name = return_model_name(self.model_type)
         encoder, decoder, model_config = model_setting(model_name, self.isPreTrain)
 
@@ -56,7 +67,7 @@ class TransformerModel(nn.Module):
         self.classifier1 = nn.Linear(self.d_hidden, self.d_embedding)
         self.classifier2 = nn.Linear(self.d_embedding, self.d_embedding)
         self.classifier3 = nn.Linear(self.d_embedding, self.num_labels)
-        self.leaky_relu = nn.LeakyReLU(0.1)
+        self.gelu = nn.GELU()
 
         # Augmenter Model Setting
         self.decoder = decoder
@@ -78,7 +89,7 @@ class TransformerModel(nn.Module):
     def encode(self, input_ids, attention_mask):
         encoder_out = self.encoder(input_ids=input_ids,
                                    attention_mask=attention_mask)
-        encoder_out = encoder_out['last_hidden_state']
+        encoder_out = encoder_out['last_hidden_state'] # (batch_size, seq_len, d_hidden)
 
         return encoder_out
 
@@ -94,29 +105,38 @@ class TransformerModel(nn.Module):
         if hidden_states.dim() == 3:
             hidden_states = hidden_states.sum(dim=1) # (batch_size, d_hidden)
 
-        classifier_out = self.dropout(self.leaky_relu(self.classifier1(hidden_states))) # (batch_size, d_embedding)
-        classifier_out = self.dropout(self.leaky_relu(self.classifier2(classifier_out))) # (batch_size, d_embedding)
+        classifier_out = self.dropout(self.gelu(self.classifier1(hidden_states))) # (batch_size, d_embedding)
+        classifier_out = self.dropout(self.gelu(self.classifier2(classifier_out))) # (batch_size, d_embedding)
         classifier_out = self.classifier3(classifier_out) # (batch_size, n_class)
 
         return classifier_out
 
     def forward(self, input_ids, attention_mask, encoder_out, latent_out=None):
 
-        seq_len = input_ids.size(1)
-
         decoder_input_ids = shift_tokens_right(
             input_ids, self.pad_idx, self.decoder_start_token_id
         )
 
-        # hidden_states = torch.add((1.0 * encoder_out), (0 * latent_out.unsqueeze(1))) # 이거 애매
-        hidden_states = encoder_out
+        if self.encoder_out_cross_attention:
+            if self.latent_out_ratio == 0:
+                encoder_hidden_states = encoder_out
+            elif self.encoder_out_ratio == 0:
+                encoder_hidden_states = latent_out
+            else:
+                encoder_hidden_states = torch.add((self.encoder_out_ratio * encoder_out), (self.latent_out_ratio * latent_out.unsqueeze(1)))
+        else:
+            encoder_hidden_states = None
+            attention_mask = None
 
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=hidden_states,
+            encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=attention_mask
         )
         decoder_outputs = decoder_outputs['last_hidden_state'] # (batch_size, seq_len, d_hidden)
+
+        if self.encoder_out_to_augmenter:
+            decoder_outputs = torch.add(decoder_outputs, encoder_out)
 
         decoder_outputs = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
         decoder_outputs = self.decoder_augmenter(self.decoder_norm(decoder_outputs))
@@ -131,16 +151,26 @@ class TransformerModel(nn.Module):
         every_batch = torch.arange(0, beam_size * batch_size, beam_size, device=device)
 
         # Total Hidden States
-        hidden_states = encoder_out # Need to fix
+        if self.encoder_out_cross_attention:
+            if self.latent_out_ratio == 0:
+                encoder_hidden_states = encoder_out
+            elif self.encoder_out_ratio == 0:
+                encoder_hidden_states = latent_out
+            else:
+                encoder_hidden_states = torch.add((self.encoder_out_ratio * encoder_out), (self.latent_out_ratio * latent_out.unsqueeze(1)))
+        else:
+            encoder_hidden_states = None
+            src_key_padding_mask = None
 
         # Expanding
-        src_key_padding_mask = attention_mask.view(batch_size, 1, -1)
-        src_key_padding_mask = src_key_padding_mask.repeat(1, beam_size, 1)
-        src_key_padding_mask = src_key_padding_mask.view(-1, src_seq_size)
+        if self.encoder_out_cross_attention:
+            src_key_padding_mask = attention_mask.view(batch_size, 1, -1)
+            src_key_padding_mask = src_key_padding_mask.repeat(1, beam_size, 1)
+            src_key_padding_mask = src_key_padding_mask.view(-1, src_seq_size)
 
-        hidden_states = hidden_states.view(-1, batch_size, 1, self.d_hidden)
-        hidden_states = hidden_states.repeat(1, 1, beam_size, 1)
-        hidden_states = hidden_states.view(src_seq_size, -1, self.d_hidden)
+            encoder_hidden_states = encoder_hidden_states.view(-1, batch_size, 1, self.d_hidden)
+            encoder_hidden_states = encoder_hidden_states.repeat(1, 1, beam_size, 1)
+            encoder_hidden_states = encoder_hidden_states.view(src_seq_size, -1, self.d_hidden)
 
         # Scores save vector & decoding list setting
         scores_save = torch.zeros(beam_size * batch_size, 1).to(device) # (batch_size * k, 1)
@@ -156,10 +186,13 @@ class TransformerModel(nn.Module):
             # Decoding sentence
             decoder_outputs = self.decoder(
                 input_ids=seqs,
-                encoder_hidden_states=hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
                 encoder_attention_mask=src_key_padding_mask
             )
             decoder_outputs = decoder_outputs['last_hidden_state']
+
+            if self.encoder_out_to_augmenter:
+                decoder_outputs = torch.add(decoder_outputs, encoder_out)
 
             # Score calculate
             scores = F.gelu(self.decoder_linear(decoder_outputs[:,-1])) # (batch_size * k, d_embedding)
@@ -264,31 +297,6 @@ class TransformerModel(nn.Module):
                 break
 
         return seqs
-
-class ClassifierModel(nn.Module):
-    def __init__(self, d_latent, num_labels: int = 2, dropout: float = 0.3):
-        super().__init__()
-
-        self.linear1 = nn.Linear(d_latent, 768)
-        self.linear2 = nn.Linear(768, 768)
-        self.linear3 = nn.Linear(768, 512)
-        self.linear4 = nn.Linear(512, 256)
-        self.linear5 = nn.Linear(256, num_labels)
-        self.dropout = nn.Dropout(dropout)
-        self.leaky_relu = nn.LeakyReLU(0.1)
-
-    def forward(self, hidden_state):
-        # encoder_out = encoder_out.mean(dim=1)
-        # out = self.dropout(self.leaky_relu(self.linear1(hidden_state)))
-        # out = self.dropout(self.leaky_relu(self.linear2(out)))
-        # out = self.linear3(out)
-        out = self.dropout(self.leaky_relu(self.linear1(hidden_state)))
-        out = self.dropout(self.leaky_relu(self.linear2(out)))
-        out = self.dropout(self.leaky_relu(self.linear3(out)))
-        out = self.dropout(self.leaky_relu(self.linear4(out)))
-        out = self.linear5(out)
-
-        return out
 
 def _prepare_bart_decoder_inputs(
     config, input_ids, decoder_input_ids=None, decoder_padding_mask=None, causal_mask_dtype=torch.float32
