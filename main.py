@@ -37,8 +37,6 @@ if __name__=='__main__':
     # Task setting
     parser.add_argument('--preprocessing', action='store_true')
     parser.add_argument('--augmenter_training', action='store_true')
-    parser.add_argument('--augmenter_training2', action='store_true')
-    parser.add_argument('--augmenter_training3', action='store_true')
     parser.add_argument('--augmenting', action='store_true')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--debuging_mode', action='store_true')
