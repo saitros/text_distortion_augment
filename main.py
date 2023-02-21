@@ -115,6 +115,8 @@ if __name__=='__main__':
     parser.add_argument('--z_variation', default=2, type=float,
                         help='')
     # Testing setting
+    parser.add_argument('--epsilon', default=0.8, type=float,
+                        help='')
     parser.add_argument('--test_batch_size', default=32, type=int, 
                         help='Test batch size; Default is 32')
     parser.add_argument('--beam_size', default=5, type=int, 

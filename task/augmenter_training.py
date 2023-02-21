@@ -244,7 +244,7 @@ def augmenter_training(args):
 
         save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint22.pth.tar')
         if val_cls_loss < best_cls_val_loss:
-            write_log(logger, 'Augmenter Checkpoint saving...')
+            write_log(logger, 'Model checkpoint saving...')
             torch.save({
                 'cls_training_done': False,
                 'epoch': epoch,
@@ -324,7 +324,7 @@ def augmenter_training(args):
                     latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
 
                 # Reconstruction 
-                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out)
+                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
                 recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
                 val_recon_loss += recon_loss
@@ -337,7 +337,7 @@ def augmenter_training(args):
 
         save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint22.pth.tar')
         if val_recon_loss < best_aug_val_loss:
-            write_log(logger, 'Augmenter Checkpoint saving...')
+            write_log(logger, 'Model checkpoint saving...')
             torch.save({
                 'cls_training_done': True,
                 'epoch': epoch,
@@ -368,24 +368,74 @@ def augmenter_training(args):
             src_output = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
 
             # Target Label Setting
-            trg_label = torch.flip(trg_label, dims=[1]).to(device)
+            fliped_trg_label = torch.flip(trg_label, dims=[1]).to(device)
 
             # Original Reconstruction
-            encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-            latent_out, _ = model.latent_encode(encoder_out=encoder_out)
-            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
+            with torch.no_grad():
+                encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+                latent_out = None
+                if args.encoder_out_mix_ratio != 0:
+                    latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
             # Reconstruction Output Tokenizing & Pre-processing
-            eps_dict['eps_0'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
-            inp_dict = model.tokenizer(eps_dict['eps_0'], max_length=args.src_max_len, 
+            detokenized = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
+            eps_dict['eps_0'] = detokenized[0]
+            inp_dict = model.tokenizer(detokenized, max_length=args.src_max_len, 
                                        padding='max_length', truncation=True, return_tensors='pt')
+
             # Probability Calculate
             with torch.no_grad():
                 encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device), 
                                                  attention_mask=inp_dict['attention_mask'].to(device))
-                # latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
-                classifier_out = model.classify(hidden_states=encoder_out_eps_0)
-            prob_dict['eps_0'] = F.softmax(classifier_out)
+                hidden_states = encoder_out_eps_0
+
+            if args.classify_method == 'latent_out':
+                latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
+                hidden_states = latent_out_eps_0
+
+            hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
+            classifier_out = model.classify(hidden_states=hidden_states_grad_true)
+            prob_dict['eps_0'] = F.softmax(classifier_out[0])
+
+            model.zero_grad()
+            cls_loss = cls_criterion(classifier_out, fliped_trg_label)
+            cls_loss.backward()
+            hidden_states_grad = hidden_states_grad_true.grad.data
+            # hidden_states_grad = hidden_states_grad.sign()
+
+            # 
+            if args.classify_method == 'latent_out':
+                encoder_out_copy = encoder_out.clone.detach()
+                latent_out_copy = hidden_states_grad_true - (args.epsilon * hidden_states_grad)
+            else:
+                encoder_out_copy = hidden_states_grad_true - (args.epsilon * hidden_states_grad)
+                latent_out_copy = None
+
+            with torch.no_grad():
+                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
+                recon_decoding = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
+                eps_dict['eps_1'] = recon_decoding[0]
+
+            inp_dict = model.tokenizer(recon_decoding,
+                                        max_length = args.src_max_len,
+                                        padding='max_length',
+                                        truncation=True,
+                                        return_tensors='pt')
+
+            # Probability Calculate
+            with torch.no_grad():
+                encoder_out_eps_1 = model.encode(input_ids=inp_dict['input_ids'].to(device), 
+                                                 attention_mask=inp_dict['attention_mask'].to(device))
+                hidden_states = encoder_out_eps_1
+
+            if args.classify_method == 'latent_out':
+                latent_out_eps_1, _ = model.latent_encode(encoder_out=encoder_out_eps_1)
+                hidden_states = latent_out_eps_1
+
+            hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
+            classifier_out = model.classify(hidden_states=hidden_states_grad_true)
+            prob_dict['eps_1'] = F.softmax(classifier_out[0])
 
             # # Iterative Latent Encoding
             # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
@@ -461,8 +511,11 @@ def augmenter_training(args):
             write_log(logger, f'Generated Examples')
             write_log(logger, f'Phase: {phase}')
             write_log(logger, f'Source: {src_output}')
-            write_log(logger, f'Source Probability: {prob_dict["eps_0"]}')
             write_log(logger, f'Augmented_origin: {eps_dict["eps_0"]}')
+            write_log(logger, f'Augmented_origin Probability: {prob_dict["eps_0"]}')
+            write_log(logger, f'Augmented: {eps_dict["eps_1"]}')
+            write_log(logger, f'Augmented Probability: {prob_dict["eps_1"]}')
+
             # for k in dict_key:
             #     if k in ['eps_5', 'eps_10', 'eps_20', 'eps_30']:
             #         write_log(logger, f'Augmented_{k}: {eps_dict[k]}')
