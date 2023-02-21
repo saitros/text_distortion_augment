@@ -373,6 +373,15 @@ def augmenter_training(args):
             # Original Reconstruction
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+                hidden_states = encoder_out
+                if args.classify_method == 'latent_out':
+                    latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                    hidden_states = latent_out
+
+                # Classifier
+                classifier_out = model.classify(hidden_states=hidden_states)
+                src_output_prob = F.softmax(classifier_out[0], dim=1)
+
                 latent_out = None
                 if args.encoder_out_mix_ratio != 0:
                     latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
@@ -396,17 +405,17 @@ def augmenter_training(args):
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_0'] = F.softmax(classifier_out[0])
+            prob_dict['eps_0'] = F.softmax(classifier_out[0], dim=1)
 
             model.zero_grad()
             cls_loss = cls_criterion(classifier_out, fliped_trg_label)
             cls_loss.backward()
             hidden_states_grad = hidden_states_grad_true.grad.data
-            # hidden_states_grad = hidden_states_grad.sign()
+            hidden_states_grad = hidden_states_grad.sign()
 
-            # 
+            # FGSM
             if args.classify_method == 'latent_out':
-                encoder_out_copy = encoder_out.clone.detach()
+                encoder_out_copy = encoder_out.clone().detach()
                 latent_out_copy = hidden_states_grad_true - (args.epsilon * hidden_states_grad)
             else:
                 encoder_out_copy = hidden_states_grad_true - (args.epsilon * hidden_states_grad)
@@ -435,7 +444,7 @@ def augmenter_training(args):
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_1'] = F.softmax(classifier_out[0])
+            prob_dict['eps_1'] = F.softmax(classifier_out[0], dim=1)
 
             # # Iterative Latent Encoding
             # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
