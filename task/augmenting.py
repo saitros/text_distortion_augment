@@ -19,7 +19,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler, autocast
 # Import custom modules
-from model.model import TransformerModel, ClassifierModel
+from model.model import TransformerModel
 from model.dataset import CustomDataset
 from utils import TqdmLoggingHandler, write_log
 from task.utils import input_to_device

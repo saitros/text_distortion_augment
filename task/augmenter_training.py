@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, RandomSampler
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 # Import custom modules
-from model.model import TransformerModel, ClassifierModel
+from model.model import TransformerModel
 from model.dataset import CustomDataset
 from model.loss import compute_mmd, CustomLoss
 from optimizer.utils import shceduler_select, optimizer_select
@@ -87,8 +87,10 @@ def augmenter_training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len,
-                                 isPreTrain=args.isPreTrain, num_labels=num_labels, dropout=args.dropout)
+    model = TransformerModel(model_type=args.model_type, isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio, 
+                             encoder_out_cross_attention=args.encoder_out_cross_attention,
+                             encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
+                             src_max_len=args.src_max_len, num_labels=num_labels, dropout=args.dropout)
     model.to(device)
 
     # 2) Dataloader setting
@@ -168,13 +170,18 @@ def augmenter_training(args):
 
             # Encoding
             encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-            # latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+            hidden_states = encoder_out
+            if args.classify_method == 'latent_out':
+                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                hidden_states = latent_out
 
             # Classifier
-            classifier_out = model.classify(hidden_states=encoder_out)
+            classifier_out = model.classify(hidden_states=hidden_states)
             cls_loss = cls_criterion(classifier_out, trg_label)
-            # mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
-            mmd_loss = torch.tensor(0)
+            if args.latent_mmd_loss:
+                mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+            else:
+                mmd_loss = torch.tensor(0)
 
             # Loss Backward
             total_cls_loss = cls_loss + mmd_loss
@@ -207,13 +214,18 @@ def augmenter_training(args):
         
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-                # latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                hidden_states = encoder_out
+                if args.classify_method == 'latent_out':
+                    latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                    hidden_states = latent_out
 
                 # Classifier
-                classifier_out = model.classify(hidden_states=encoder_out)
+                classifier_out = model.classify(hidden_states=hidden_states)
                 cls_loss = cls_criterion(classifier_out, trg_label)
-                # mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
-                mmd_loss = torch.tensor(0)
+                if args.latent_mmd_loss:
+                    mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+                else:
+                    mmd_loss = torch.tensor(0)
 
             # Loss and Accuracy Check
             val_acc += (classifier_out.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
@@ -265,10 +277,12 @@ def augmenter_training(args):
             # Encoding
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-                # latent_out, _ = model.latent_encode(encoder_out=encoder_out)
+                latent_out = None
+                if args.encoder_out_mix_ratio != 0:
+                    latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
 
             # Reconstruction
-            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out)
+            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
             # Loss Backward
@@ -305,10 +319,13 @@ def augmenter_training(args):
             # Encoding
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-                # latent_out, _ = model.latent_encode(encoder_out=encoder_out)
+                latent_out = None
+                if args.encoder_out_mix_ratio != 0:
+                    latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+
+                # Reconstruction 
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out)
 
-                # Reconstruction Loss
                 recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
                 val_recon_loss += recon_loss
 

@@ -8,3 +8,4 @@ tensorboard_runs/
 *.pkl
 *.hdf5
 *.csv
+*.sh

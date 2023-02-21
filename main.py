@@ -26,9 +26,6 @@ def main(args):
     if args.augmenting:
         augmenting(args)
 
-    # if args.testing:
-    #     testing(args)
-
     # Time calculate
     print(f'Done! ; {round((time.time()-total_start_time)/60, 3)}min spend')
 
@@ -59,8 +56,16 @@ if __name__=='__main__':
                         help='Use pre-trained language model; Default is True')
     parser.add_argument('--model_type', default='bert', type=str,
                         help='Augmentation model type; Default is BERT')
-    parser.add_argument('--encoder_out_ratio', default=0.3, type=float,
+    parser.add_argument('--classify_method', default='latent_out', type=str, choices=['encoder_out', 'latnet_out'],
                         help='')
+    parser.add_argument('--encoder_out_mix_ratio', default=0.3, type=float,
+                        help='Encoder output ratio to input of decoder; Default is 0.3')
+    parser.add_argument('--encoder_out_cross_attention', default=True, type=str2bool,
+                        help='Use cross attention of decoder via encoder out; Default is True')
+    parser.add_argument('--encoder_out_to_augmenter', default=False, type=str2bool,
+                        help='Add decoder output and encoder output to augmenter; Default is False')
+    parser.add_argument('--latent_out_to_augmenter', default=True, type=str2bool,
+                        help='Add decoder output and latent output to augmenter; Default is True')
     parser.add_argument('--latent_mmd_loss', default=False, type=str2bool,
                         help='')
     # Optimizer & LR_Scheduler setting
