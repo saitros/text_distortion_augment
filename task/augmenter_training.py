@@ -380,7 +380,7 @@ def augmenter_training(args):
 
                 # Classifier
                 classifier_out = model.classify(hidden_states=hidden_states)
-                src_output_prob = F.softmax(classifier_out[0], dim=1)
+                src_output_prob = F.softmax(classifier_out, dim=0)[0]
 
                 latent_out = None
                 if args.encoder_out_mix_ratio != 0:
@@ -405,7 +405,7 @@ def augmenter_training(args):
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_0'] = F.softmax(classifier_out[0], dim=1)
+            prob_dict['eps_0'] = F.softmax(classifier_out, dim=0)[0]
 
             model.zero_grad()
             cls_loss = cls_criterion(classifier_out, fliped_trg_label)
@@ -444,77 +444,8 @@ def augmenter_training(args):
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_1'] = F.softmax(classifier_out[0], dim=1)
+            prob_dict['eps_1'] = F.softmax(classifier_out, dim=0)[0]
 
-            # # Iterative Latent Encoding
-            # encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-            # latent_out_copy, _ = model.latent_encode(encoder_out=encoder_out_copy)
-            # latent_out_copy.retain_grad()
-            
-            # classifier_out = model.classify(latent_out=encoder_out_copy)
-            # cls_loss = cls_criterion(classifier_out, trg_label)
-            # model.zero_grad()
-            # cls_loss.backward()
-            
-            # encoder_out_copy_grad = encoder_out_copy.grad.data
-            # encoder_out_copy_grad = encoder_out_copy_grad.sign()
-
-            # for i in range(51): # Need to fix
-
-            #     # fixed epsilon methods
-            #     epsilon = 0.8
-
-            #     encoder_out_copy = encoder_out_copy - ((epsilon * 1.0) * encoder_out_copy_grad)
-
-            #     with torch.no_grad():
-            #         recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
-                
-            #         recon_decoding = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
-            #         eps_dict[f'eps_{i}'] = recon_decoding[0]
-                
-            #         inp_dict = model.tokenizer(recon_decoding,
-            #                                     max_length = args.src_max_len,
-            #                                     padding='max_length',
-            #                                     truncation=True,
-            #                                     return_tensors='pt')
-
-            #         encoder_out = model.encode(input_ids=inp_dict['input_ids'].to(device), attention_mask=inp_dict['attention_mask'].to(device))
-            #         latent_out, _ = model.latent_encode(encoder_out=encoder_out)
-
-            #     encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-            #     latent_out_copy, _ = model.latent_encode(encoder_out=encoder_out_copy)
-            #     latent_out_copy.retain_grad()
-            #     classifier_out = model.classify(latent_out=encoder_out_copy)
-            #     prob_dict[f'eps_{i}'] = F.softmax(classifier_out)[0]
-                
-            #     cls_loss = cls_criterion(classifier_out, trg_label)
-            #     model.zero_grad()
-            #     cls_loss.backward()
-            #     encoder_out_copy_grad = encoder_out_copy.grad.data
-            #     encoder_out_copy_grad = encoder_out_copy_grad.sign()
-
-            # Previous code
-            # for epsilon in [2, 5, 8, 10, 15, 20, 30]:
-            #     epsilon_float = epsilon * 0.01
-            #     encoder_out_copy = encoder_out_copy - ((encoder_out_copy * 1.0) * encoder_out_copy_grad)
-
-            #     with torch.no_grad():
-            #         recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
-
-            #     # Augmenting
-            #     eps_dict[f'eps_{epsilon}'] = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)[0]
-
-            #     with torch.no_grad():
-            #         inp_dict = model.tokenizer(eps_dict[f'eps_{epsilon}'],
-            #                                        max_length=args.src_max_len,
-            #                                        padding='max_length',
-            #                                        truncation=True,
-            #                                        return_tensors='pt')
-            #         encoder_out = model.encode(input_ids=inp_dict['input_ids'].to(device), attention_mask=inp_dict['attention_mask'].to(device))
-            #         latent_out, _ = model.latent_encode(encoder_out=encoder_out)
-            #         classifier_out = model.classify(latent_out=encoder_out)
-            #         prob_dict[f'eps_{epsilon}'] = F.softmax(classifier_out)
-            
             dict_key = prob_dict.keys()
             
             write_log(logger, f'Generated Examples')
@@ -524,17 +455,6 @@ def augmenter_training(args):
             write_log(logger, f'Augmented_origin Probability: {prob_dict["eps_0"]}')
             write_log(logger, f'Augmented: {eps_dict["eps_1"]}')
             write_log(logger, f'Augmented Probability: {prob_dict["eps_1"]}')
-
-            # for k in dict_key:
-            #     if k in ['eps_5', 'eps_10', 'eps_20', 'eps_30']:
-            #         write_log(logger, f'Augmented_{k}: {eps_dict[k]}')
-            #         write_log(logger, f'Probability_{k}: {prob_dict[k]}')
-#             write_log(logger, f'Augmented_2: {eps_dict["eps_2"]}')
-#             write_log(logger, f'Augmented_2_prob: {prob_dict["eps_2"]}')
-#             write_log(logger, f'Augmented_5: {eps_dict["eps_5"]}')
-#             write_log(logger, f'Augmented_5_prob: {prob_dict["eps_5"]}')
-#             write_log(logger, f'Augmented_8: {eps_dict["eps_8"]}')
-#             write_log(logger, f'Augmented_8_prob: {prob_dict["eps_8"]}')
 
     # 3) Results
     write_log(logger, f'Best AUG Epoch: {best_aug_epoch}')

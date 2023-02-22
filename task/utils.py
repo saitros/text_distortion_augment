@@ -71,6 +71,42 @@ def data_load(args):
         src_list['test'] = test_dat['sentence'].tolist()
         trg_list['test'] = test_dat['label'].tolist()
 
+    if args.data_name == 'mnli':
+        dataset = load_dataset("glue", args.data_name)
+        train_dat = pd.DataFrame(dataset['train'])
+        valid_dat = pd.DataFrame(dataset['validation_matched'])
+        test_dat = pd.DataFrame(dataset['test_matched'])
+
+        src_list['train_sent1'] = train_dat['premise'].tolist()
+        src_list['train_sent2'] = train_dat['hypothesis'].tolist()
+        trg_list['train'] = train_dat['label'].tolist()
+
+        src_list['valid_sent1'] = valid_dat['premise'].tolist()
+        src_list['valid_sent2'] = valid_dat['hypothesis'].tolist()
+        trg_list['valid'] = valid_dat['label'].tolist()
+
+        src_list['test_sent1'] = test_dat['premise'].tolist()
+        src_list['test_sent2'] = test_dat['hypothesis'].tolist()
+        trg_list['test'] = test_dat['label'].tolist()
+
+    if args.data_name == 'mrpc':
+        dataset = load_dataset("glue", args.data_name)
+        train_dat = pd.DataFrame(dataset['train'])
+        valid_dat = pd.DataFrame(dataset['validation_matched'])
+        test_dat = pd.DataFrame(dataset['test_matched'])
+
+        src_list['train_sent1'] = train_dat['sentence1'].tolist()
+        src_list['train_sent2'] = train_dat['sentence2'].tolist()
+        trg_list['train'] = train_dat['label'].tolist()
+
+        src_list['valid_sent1'] = valid_dat['sentence1'].tolist()
+        src_list['valid_sent2'] = valid_dat['sentence2'].tolist()
+        trg_list['valid'] = valid_dat['label'].tolist()
+
+        src_list['test_sent1'] = test_dat['sentence1'].tolist()
+        src_list['test_sent2'] = test_dat['sentence2'].tolist()
+        trg_list['test'] = test_dat['label'].tolist()
+
     if args.data_name == 'korean_hate_speech':
         args.data_path = os.path.join(args.data_path,'korean-hate-speech-detection')
 
@@ -93,6 +129,42 @@ def data_load(args):
         trg_list['test'] = [0 for _ in range(len(test_dat))]
         
     return src_list, trg_list
+
+def tokenizing(src_list, tokenizer):
+    processed_sequences = dict()
+    processed_sequences['train'] = dict()
+    processed_sequences['valid'] = dict()
+    processed_sequences['test'] = dict()
+
+    if args.data_name in []:
+        for phase in ['train', 'valid', 'test']:
+            encoded_dict = \
+            tokenizer(
+                src_list[phase],
+                max_length=args.src_max_len,
+                padding='max_length',
+                truncation=True
+            )
+            processed_sequences[phase]['input_ids'] = encoded_dict['input_ids']
+            processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
+            if args.model_type == 'bert':
+                processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
+
+    if args.data_name in []:
+        for phase in ['train', 'valid', 'test']:
+            encoded_dict = \
+            tokenizer(
+                src_list['f{phase}_sent1'], src_list['f{phase}_sent2']
+                max_length=args.src_max_len,
+                padding='max_length',
+                truncation=True
+            )
+            processed_sequences[phase]['input_ids'] = encoded_dict['input_ids']
+            processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
+            if args.model_type == 'bert':
+                processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
+
+    return processed_sequences
 
 def input_to_device(batch_iter, device):
 
