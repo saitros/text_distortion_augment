@@ -105,7 +105,7 @@ def augmenting(args):
     #===================================#
     #=========Model Train Start=========#
     #===================================#
-    
+
     start_time_e = time()
     write_log(logger, 'Augmenting start...')
     model.eval()
@@ -131,7 +131,7 @@ def augmenting(args):
         # Source De-tokenizing
         origin_source = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
         origin_list.extend(origin_source)
-        
+
         # Encoding
         with torch.no_grad():
             encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
@@ -153,7 +153,7 @@ def augmenting(args):
         aug_dict['eps_0'].extend(beam_output)
         prob_dict['eps_0'].extend(F.softmax(classifier_out, dim=1))
 
-        # 
+        #
         cls_loss = cls_criterion(classifier_out, trg_fliped_label)
         model.zero_grad()
         cls_loss.backward()
@@ -161,7 +161,7 @@ def augmenting(args):
         encoder_out_copy_grad_sign = encoder_out_copy_grad.sign()
 
         for step in range(51): # * 0.9
-            
+
             epsilon = 0.8 # Need to fix
 
             encoder_out_copy = encoder_out_copy + (epsilon * encoder_out_copy_grad_sign)
@@ -186,7 +186,7 @@ def augmenting(args):
                 aug_dict[f'eps_{step}'].extend(beam_output)
                 prob_dict[f'eps_{step}'].extend(F.softmax(classifier_out, dim=1))
 
-            # 
+            #
             cls_loss = cls_criterion(classifier_out, trg_fliped_label)
             model.zero_grad()
             cls_loss.backward()
@@ -195,7 +195,7 @@ def augmenting(args):
 
         if args.debuging_mode:
             break
-        
+
     result_dat = pd.DataFrame({
         'origin': origin_list,
         'eps_0': aug_dict['eps_0'],

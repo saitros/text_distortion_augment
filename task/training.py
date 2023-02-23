@@ -82,7 +82,7 @@ def training(args):
         if args.model_type == 'bert':
             aug_train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
             train_src_token_type_ids = np.concatenate((train_src_token_type_ids, aug_train_src_token_type_ids), axis=0)
-        
+
     with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
         data_ = pickle.load(f)
         src_word2id = data_['src_word2id']
@@ -141,7 +141,7 @@ def training(args):
     if args.resume:
         write_log(logger, 'Resume model...')
         save_path = os.path.join(args.model_save_path, args.data_name)
-        save_file_name = os.path.join(save_path, 
+        save_file_name = os.path.join(save_path,
                                         f'checkpoint_src_{args.src_vocab_size}_trg_{args.trg_vocab_size}_v_{args.variational_mode}_p_{args.parallel}.pth.tar')
         checkpoint = torch.load(save_file_name)
         start_epoch = checkpoint['epoch'] - 1
@@ -157,7 +157,7 @@ def training(args):
     write_log(logger, 'Traing start!')
     best_aug_val_loss = 1e+4
     best_cls_val_loss = 1e+4
-    
+
     for epoch in range(start_epoch + 1, args.aug_num_epochs + 1):
         start_time_e = time()
 
@@ -178,7 +178,7 @@ def training(args):
             #===================================#
 
             # Augmenter training
-            decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+            decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence,
                                                                 src_attention_mask=src_att)
             mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
 
@@ -204,7 +204,7 @@ def training(args):
         #===================================#
         write_log(logger, 'Augmenter validation start...')
 
-        # Validation 
+        # Validation
         aug_model.eval()
 
         val_mmd_loss = 0
@@ -217,10 +217,10 @@ def training(args):
             # Reconsturction setting
             trg_sequence_gold = src_sequence.contiguous().view(-1)
             non_pad = trg_sequence_gold != aug_model.pad_idx
-        
+
             with torch.no_grad():
                 # Augmenter training
-                decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+                decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence,
                                                                  src_attention_mask=src_att)
                 mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
                 recon_loss = recon_criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
@@ -267,7 +267,7 @@ def training(args):
 
             with torch.no_grad():
                 # Augmenter training
-                decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+                decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence,
                                                                  src_attention_mask=src_att)
             encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
             latent_out_copy = latent_out.clone().detach().requires_grad_(True)
@@ -299,7 +299,7 @@ def training(args):
         #===================================#
         write_log(logger, 'Classifier validation start...')
 
-        # Validation 
+        # Validation
         cls_model.eval()
 
         val_cls_loss = 0
@@ -312,10 +312,10 @@ def training(args):
             # Reconsturction setting
             trg_sequence_gold = src_sequence.contiguous().view(-1)
             non_pad = trg_sequence_gold != aug_model.pad_idx
-        
+
             with torch.no_grad():
                 # Augmenter training
-                decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+                decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence,
                                                                  src_attention_mask=src_att)
 
             with torch.no_grad():
@@ -370,13 +370,13 @@ def training(args):
 
         # Augmenter
         with torch.no_grad():
-            decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence, 
+            decoder_out, encoder_out, latent_out = aug_model(src_input_ids=src_sequence,
                                                              src_attention_mask=src_att)
         encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
         latent_out_copy = latent_out.clone().detach().requires_grad_(True)
         src_output = aug_model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
         seq_list.extend(src_output)
-        
+
         aug_list['origin'].extend(aug_model.tokenizer.batch_decode(decoder_out.argmax(dim=2), skip_special_tokens=True))
 
         for epsilon in [2, 3, 4, 5]: # * 0.9
@@ -392,7 +392,7 @@ def training(args):
 
             with torch.no_grad():
                 with autocast():
-                    decoder_out = aug_model.generate(src_input_ids=src_sequence, 
+                    decoder_out = aug_model.generate(src_input_ids=src_sequence,
                                                      src_attention_mask=src_att,
                                                      z=data)
 

@@ -60,24 +60,24 @@ def compute_kernel(x, y):
     return torch.exp(-kernel_input)
 
 def compute_mmd(z_tilde, z_var):
-    
+
     z = Variable(z_tilde.data.new(z_tilde.size()).normal_(std=z_var))
-    
+
     x_kernel = compute_kernel(z_tilde, z_tilde)
     y_kernel = compute_kernel(z, z)
     xy_kernel = compute_kernel(z_tilde, z)
     mmd = x_kernel.mean() + y_kernel.mean() - 2*xy_kernel.mean()
-    
-    return mmd 
+
+    return mmd
 
 def compute_mmd2(z, z_tilde, z_var):
-    
+
     x_kernel = compute_kernel(z_tilde, z_tilde)
     y_kernel = compute_kernel(z, z)
     xy_kernel = compute_kernel(z_tilde, z)
     mmd = x_kernel.mean() + y_kernel.mean() - 2*xy_kernel.mean()
-    
-    return mmd 
+
+    return mmd
 
 class CustomLoss(nn.Module):
     def __init__(self, model, device, num_labels):
