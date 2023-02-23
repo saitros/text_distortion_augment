@@ -380,7 +380,7 @@ def augmenter_training(args):
 
                 # Classifier
                 classifier_out = model.classify(hidden_states=hidden_states)
-                src_output_prob = F.softmax(classifier_out, dim=0)[0]
+                src_output_prob = F.softmax(classifier_out)[0]
 
                 latent_out = None
                 if args.encoder_out_mix_ratio != 0:
@@ -405,7 +405,7 @@ def augmenter_training(args):
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_0'] = F.softmax(classifier_out, dim=0)[0]
+            prob_dict['eps_0'] = F.softmax(classifier_out)[0]
 
             model.zero_grad()
             cls_loss = cls_criterion(classifier_out, fliped_trg_label)
@@ -444,7 +444,7 @@ def augmenter_training(args):
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_1'] = F.softmax(classifier_out, dim=0)[0]
+            prob_dict['eps_1'] = F.softmax(classifier_out)[0]
 
             dict_key = prob_dict.keys()
             
