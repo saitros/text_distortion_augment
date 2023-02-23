@@ -55,7 +55,7 @@ def augmenter_training(args):
 
     save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
 
-    with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'r') as f:
+    with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed.hdf5'), 'r') as f:
         train_src_input_ids = f.get('train_src_input_ids')[:]
         train_src_attention_mask = f.get('train_src_attention_mask')[:]
         valid_src_input_ids = f.get('valid_src_input_ids')[:]
