@@ -130,13 +130,27 @@ def data_load(args):
         
     return src_list, trg_list
 
-def tokenizing(src_list, tokenizer):
+def tokenizing(args, src_list, tokenizer):
     processed_sequences = dict()
     processed_sequences['train'] = dict()
     processed_sequences['valid'] = dict()
     processed_sequences['test'] = dict()
 
-    if args.data_name in []:
+    if args.data_name in ['mnli', 'mrpc']:
+        for phase in ['train', 'valid', 'test']:
+            encoded_dict = \
+            tokenizer(
+                src_list['f{phase}_sent1'], src_list['f{phase}_sent2'],
+                max_length=args.src_max_len,
+                padding='max_length',
+                truncation=True
+            )
+            processed_sequences[phase]['input_ids'] = encoded_dict['input_ids']
+            processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
+            if args.model_type == 'bert':
+                processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
+
+    else:
         for phase in ['train', 'valid', 'test']:
             encoded_dict = \
             tokenizer(
@@ -150,19 +164,6 @@ def tokenizing(src_list, tokenizer):
             if args.model_type == 'bert':
                 processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
 
-    if args.data_name in []:
-        for phase in ['train', 'valid', 'test']:
-            encoded_dict = \
-            tokenizer(
-                src_list['f{phase}_sent1'], src_list['f{phase}_sent2']
-                max_length=args.src_max_len,
-                padding='max_length',
-                truncation=True
-            )
-            processed_sequences[phase]['input_ids'] = encoded_dict['input_ids']
-            processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
-            if args.model_type == 'bert':
-                processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
 
     return processed_sequences
 

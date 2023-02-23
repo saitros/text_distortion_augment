@@ -8,7 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 from transformers import AutoTokenizer
 # Import custom modules
-from task.utils import data_load
+from task.utils import data_load, tokenizing
 from utils import TqdmLoggingHandler, write_log, return_model_name
 
 from datasets import load_dataset
@@ -46,23 +46,7 @@ def preprocessing(args):
     model_name = return_model_name(args.model_type)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    processed_sequences = dict()
-    processed_sequences['train'] = dict()
-    processed_sequences['valid'] = dict()
-    processed_sequences['test'] = dict()
-
-    for phase in ['train', 'valid', 'test']:
-        encoded_dict = \
-        tokenizer(
-            src_list[phase],
-            max_length=args.src_max_len,
-            padding='max_length',
-            truncation=True
-        )
-        processed_sequences[phase]['input_ids'] = encoded_dict['input_ids']
-        processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
-        if args.model_type == 'bert':
-            processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
+    processed_sequences = tokenizing(args, src_list, tokenizer)
 
     write_log(logger, f'Done! ; {round((time.time()-start_time)/60, 3)}min spend')
 
@@ -76,7 +60,7 @@ def preprocessing(args):
     # Path checking
     save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
 
-    with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'w') as f:
+    with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed.hdf5'), 'w') as f:
         f.create_dataset('train_src_input_ids', data=processed_sequences['train']['input_ids'])
         f.create_dataset('train_src_attention_mask', data=processed_sequences['train']['attention_mask'])
         f.create_dataset('valid_src_input_ids', data=processed_sequences['valid']['input_ids'])
@@ -87,7 +71,7 @@ def preprocessing(args):
             f.create_dataset('train_src_token_type_ids', data=processed_sequences['train']['token_type_ids'])
             f.create_dataset('valid_src_token_type_ids', data=processed_sequences['valid']['token_type_ids'])
 
-    with h5py.File(os.path.join(save_path, 'test_processed.hdf5'), 'w') as f:
+    with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_test_processed.hdf5'), 'w') as f:
         f.create_dataset('test_src_input_ids', data=processed_sequences['test']['input_ids'])
         f.create_dataset('test_src_attention_mask', data=processed_sequences['test']['attention_mask'])
         f.create_dataset('test_label', data=np.array(trg_list['test']).astype(int))
