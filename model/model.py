@@ -120,10 +120,10 @@ class TransformerModel(nn.Module):
         if self.encoder_out_cross_attention:
             if self.latent_out_mix_ratio == 0:
                 encoder_hidden_states = encoder_out
-            elif self.encoder_out_ratio == 0:
+            elif self.encoder_out_mix_ratio == 0:
                 encoder_hidden_states = latent_out
             else:
-                encoder_hidden_states = torch.add((self.encoder_out_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
+                encoder_hidden_states = torch.add((self.encoder_out_mix_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
         else:
             encoder_hidden_states = None
             attention_mask = None

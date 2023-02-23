@@ -79,9 +79,9 @@ if __name__=='__main__':
                         help="Choose optimizer setting in 'AdamW', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--aug_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
-    parser.add_argument('--cls_lr', default=5e-4, type=float,
+    parser.add_argument('--cls_lr', default=5e-5, type=float,
                         help='Maximum learning rate of warmup scheduler; Default is 5e-4')
-    parser.add_argument('--aug_lr', default=5e-4, type=float,
+    parser.add_argument('--aug_lr', default=5e-5, type=float,
                         help='Maximum learning rate of warmup scheduler; Default is 5e-4')
     parser.add_argument('--n_warmup_epochs', default=2, type=float, 
                         help='Wamrup epochs when using warmup scheduler; Default is 2')
