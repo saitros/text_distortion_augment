@@ -242,7 +242,7 @@ def augmenter_training(args):
         write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint22.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
         if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -335,7 +335,7 @@ def augmenter_training(args):
         val_recon_loss /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint22.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -416,9 +416,9 @@ def augmenter_training(args):
             # FGSM
             if args.classify_method == 'latent_out':
                 encoder_out_copy = encoder_out.clone().detach()
-                latent_out_copy = hidden_states_grad_true - (args.epsilon * hidden_states_grad)
+                latent_out_copy = hidden_states_grad_true - (args.fgsm_epsilon * hidden_states_grad)
             else:
-                encoder_out_copy = hidden_states_grad_true - (args.epsilon * hidden_states_grad)
+                encoder_out_copy = hidden_states_grad_true - (args.fgsm_epsilon * hidden_states_grad)
                 latent_out_copy = None
 
             with torch.no_grad():

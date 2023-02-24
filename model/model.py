@@ -1,5 +1,6 @@
 import math
 from collections import defaultdict
+from tqdm.auto import tqdm
 # Import PyTorch
 import torch
 import torch.nn as nn
@@ -44,7 +45,7 @@ class TransformerModel(nn.Module):
         assert encoder_out_mix_ratio <= 1.0
         self.encoder_out_mix_ratio = encoder_out_mix_ratio
         self.latent_out_mix_ratio = 1.0 - encoder_out_mix_ratio
-        
+
         # Model setting
         self.model_type = model_type
         model_name = return_model_name(self.model_type)
@@ -101,7 +102,6 @@ class TransformerModel(nn.Module):
         return latent_decoder_out, latent_encoder_out
 
     def classify(self, hidden_states):
-
         if hidden_states.dim() == 3:
             hidden_states = hidden_states.sum(dim=1) # (batch_size, d_hidden)
 
@@ -120,10 +120,10 @@ class TransformerModel(nn.Module):
         if self.encoder_out_cross_attention:
             if self.latent_out_mix_ratio == 0:
                 encoder_hidden_states = encoder_out
-            elif self.encoder_out_ratio == 0:
+            elif self.encoder_out_mix_ratio == 0:
                 encoder_hidden_states = latent_out
             else:
-                encoder_hidden_states = torch.add((self.encoder_out_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
+                encoder_hidden_states = torch.add((self.encoder_out_mix_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
         else:
             encoder_hidden_states = None
             attention_mask = None
@@ -143,21 +143,20 @@ class TransformerModel(nn.Module):
 
         return decoder_outputs
 
-    def generate(self, encoder_out, attention_mask, beam_size, beam_alpha, repetition_penalty, device):
+    def generate(self, encoder_out, latent_out, attention_mask, beam_size, beam_alpha, repetition_penalty, device):
         # Input, output setting
-        batch_size = input_ids.size(0)
-        src_seq_size = input_ids.size(1)
-        encoder_out_dict = defaultdict(list)
+        batch_size = encoder_out.size(0)
+        src_seq_size = encoder_out.size(1)
         every_batch = torch.arange(0, beam_size * batch_size, beam_size, device=device)
 
         # Total Hidden States
         if self.encoder_out_cross_attention:
             if self.latent_out_mix_ratio == 0:
                 encoder_hidden_states = encoder_out
-            elif self.encoder_out_ratio == 0:
+            elif self.encoder_out_mix_ratio == 0:
                 encoder_hidden_states = latent_out
             else:
-                encoder_hidden_states = torch.add((self.encoder_out_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
+                encoder_hidden_states = torch.add((self.encoder_out_mix_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
         else:
             encoder_hidden_states = None
             src_key_padding_mask = None
@@ -192,7 +191,14 @@ class TransformerModel(nn.Module):
             decoder_outputs = decoder_outputs['last_hidden_state']
 
             if self.encoder_out_to_augmenter:
-                decoder_outputs = torch.add(decoder_outputs, encoder_out)
+                # Add encoder_out (batch_size, seq_len, d_hidden) for decoder_outputs (batch_size * k, seq_len, d_hidden)
+                encoder_out_for_augmenter = encoder_out.sum(dim=1).unsqueeze(1) # (batch_size, 1, d_hidden)
+                encoder_out_for_augmenter = encoder_out_for_augmenter.repeat(1, decoder_outputs.size(1), 1) # (batch_size, seq_len, d_hidden)
+                encoder_out_for_augmenter = encoder_out_for_augmenter.unsqueeze(1) # (batch_size, 1, seq_len, d_hidden)
+                encoder_out_for_augmenter = encoder_out_for_augmenter.repeat(1, beam_size, 1, 1) # (batch_size, k, seq_len, d_hidden)
+                encoder_out_for_augmenter = encoder_out_for_augmenter.view(-1, decoder_outputs.size(1), self.d_hidden) # (batch_size * k, seq_len, d_hidden)
+
+                decoder_outputs = torch.add(decoder_outputs, encoder_out_for_augmenter)
 
             # Score calculate
             scores = F.gelu(self.decoder_linear(decoder_outputs[:,-1])) # (batch_size * k, d_embedding)
@@ -253,18 +259,127 @@ class TransformerModel(nn.Module):
         _, ind = scores_save.view(batch_size, beam_size, -1).max(1)
         ind_expand = ind.view(-1) + every_batch
         predicted = [complete_seqs[i] for i in ind_expand.tolist()]
+
         return predicted
 
-    def generate_topk(self, encoder_out, attention_mask, device, topk=5, softmax_temp=5.0):
-        # BART decoder start token
-        seqs = torch.tensor([[self.decoder_start_token_id]], dtype=torch.long, device=device)
-        hidden_states = encoder_out
+    def generate_sample(self, encoder_out, latent_out, attention_mask, sampling_strategy, device, topk=5, topp=0.9, softmax_temp=3.0):
+        # Input, output setting
+        batch_size = encoder_out.size(0)
+        src_seq_size = encoder_out.size(1)
 
+        # Total Hidden States
+        if self.encoder_out_cross_attention:
+            src_key_padding_mask = attention_mask
+            if self.latent_out_mix_ratio == 0:
+                encoder_hidden_states = encoder_out
+            elif self.encoder_out_mix_ratio == 0:
+                encoder_hidden_states = latent_out
+            else:
+                encoder_hidden_states = torch.add((self.encoder_out_mix_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
+        else:
+            encoder_hidden_states = None
+            src_key_padding_mask = None
+
+        # Decoding start token setting
+        seqs = torch.tensor([[self.decoder_start_token_id]], dtype=torch.long, device=device)
+        seqs = seqs.repeat(batch_size, 1).contiguous() # (batch_size, 1)
+
+        for step in range(self.src_max_len):
+            # Decoding sentence
+            decoder_outputs = self.decoder(
+                input_ids=seqs,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_attention_mask=src_key_padding_mask
+            )
+            decoder_outputs = decoder_outputs['last_hidden_state']
+
+            if self.encoder_out_to_augmenter:
+                encoder_out_for_augmenter = encoder_out.sum(dim=1).unsqueeze(1) # (batch_size, 1, d_hidden)
+                encoder_out_for_augmenter = encoder_out_for_augmenter.repeat(1, decoder_outputs.size(1), 1) # (batch_size, seq_len, d_hidden)
+
+                decoder_outputs = torch.add(decoder_outputs, encoder_out_for_augmenter)
+
+            # Next word probability
+            scores = F.gelu(self.decoder_linear(decoder_outputs[:,-1])) # (batch_size, d_embedding)
+            scores = self.decoder_augmenter(self.decoder_norm(scores)) # (batch_size, vocab_num)
+            # Avoid generating <pad> and <s> token and apply softmax temperature
+            scores[:, self.pad_idx] = float('-inf')
+            scores[:, self.bos_idx] = float('-inf')
+            scores = scores / softmax_temp
+            next_word_prob = F.softmax(scores, dim=1) # (batch_size, vocab_num)
+
+            # Sampling through predetermined strategy
+            if sampling_strategy == 'greedy':
+                next_word = torch.argmax(next_word_prob, dim=-1)
+            elif sampling_strategy == 'multinomial':
+                next_word = torch.multinomial(next_word_prob, 1).squeeze(1) # (batch_size)
+            elif sampling_strategy == 'topk':
+                # Get topk token
+                topk_prob, topk_idx = torch.topk(next_word_prob, topk, dim=-1) # (batch_size, topk)
+                topk_prob = topk_prob / torch.sum(topk_prob.sum(dim=-1, keepdim=True)) # (batch_size, topk) - normalize probability to sum 1
+                next_token_idx = torch.multinomial(topk_prob, 1).squeeze(1) # (batch_size) - sample token from topk token
+                next_word = topk_idx[torch.arange(topk_idx.size(0)), next_token_idx] # (batch_size)
+            elif sampling_strategy == 'topp':
+                # Get topp token
+                sorted_prob, sorted_idx = torch.sort(next_word_prob, descending=True, dim=-1)
+                sorted_prob = sorted_prob.cumsum(dim=-1) # (batch_size, vocab_num)
+                sorted_idx = sorted_idx[sorted_prob <= topp] # (batch_size, vocab_num)
+                sorted_prob = sorted_prob[sorted_prob <= topp] # (batch_size, vocab_num)
+                sorted_prob = sorted_prob / torch.sum(sorted_prob.sum(dim=-1, keepdim=True)) # (batch_size, vocab_num) - normalize probability to sum 1
+                next_token_idx = torch.multinomial(sorted_prob, 1).squeeze(1) # (batch_size) - sample token from topp token
+                next_word = sorted_idx[torch.arange(sorted_idx.size(0)), next_token_idx] # (batch_size)
+            else:
+                raise ValueError('Sampling strategy is not defined')
+
+            # Concatenate generated token to sequence
+            next_word = next_word.unsqueeze(1) # (batch_size, 1)
+            seqs = torch.cat([seqs, next_word], dim=1) # (batch_size, seq_len + 1)
+
+        print(seqs)
+        return seqs
+        # Postprocessing - remove generated tokens after <eos> token
+        seqs = seqs.tolist()
+        for i in range(batch_size):
+            if self.eos_idx in seqs[i]:
+                seqs[i] = seqs[i][:seqs[i].index(self.eos_idx) + 1] # remove generated tokens after <eos> token
+            else:
+                pass # do nothing if <eos> token is not generated
+
+        return seqs
+
+    def generate_topk(self, encoder_out, latent_out, attention_mask, device, topk=5, softmax_temp=5.0):
+        # Input, output setting
+        batch_size = encoder_out.size(0)
+        src_seq_size = encoder_out.size(1)
+
+        # Total Hidden States
+        if self.encoder_out_cross_attention:
+            if self.latent_out_mix_ratio == 0:
+                encoder_hidden_states = encoder_out
+            elif self.encoder_out_ratio == 0:
+                encoder_hidden_states = latent_out
+            else:
+                encoder_hidden_states = torch.add((self.encoder_out_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
+        else:
+            encoder_hidden_states = None
+            src_key_padding_mask = None
+
+        # Expanding
+        if self.encoder_out_cross_attention:
+            src_key_padding_mask = attention_mask.view(batch_size, 1, -1) # (batch_size, 1, src_seq_size)
+            src_key_padding_mask = src_key_padding_mask.view(-1, src_seq_size)
+
+            encoder_hidden_states = encoder_hidden_states.view(-1, batch_size, 1, self.d_hidden)
+            encoder_hidden_states = encoder_hidden_states.view(src_seq_size, -1, self.d_hidden)
+
+        # BART decoder start token
+        seqs = torch.tensor([[self.decoder_start_token_id]], dtype=torch.long, device=device) # (1, 1)
+        seqs = seqs.repeat(batch_size, 1) # (batch_size, 1) # <s> token
         # Generate sentence
         for step in range(self.src_max_len):
             decoder_outputs = self.decoder(
                 input_ids=seqs,
-                encoder_hidden_states=hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
                 encoder_attention_mask=attention_mask
             )
             decoder_outputs = decoder_outputs['last_hidden_state'] # (batch_size, seq_len, d_embedding)
@@ -349,7 +464,6 @@ def fill_with_neg_inf(t):
     return t.float().fill_(float("-inf")).type_as(t)
 
 class PositionalEmbedding(nn.Module):
-
     def __init__(self, d_model, max_len=512):
         super().__init__()
 

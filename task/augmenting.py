@@ -22,7 +22,7 @@ from torch.cuda.amp import GradScaler, autocast
 from model.model import TransformerModel
 from model.dataset import CustomDataset
 from utils import TqdmLoggingHandler, write_log
-from task.utils import input_to_device
+from task.utils import input_to_device, tokenizing
 
 def augmenting(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -87,7 +87,7 @@ def augmenting(args):
                                trg_list=train_trg_list, src_max_len=args.src_max_len)
     }
     dataloader_dict = {
-        'train': DataLoader(dataset_dict['train'], drop_last=False,
+        'train': DataLoader(dataset_dict['train'][:50], drop_last=False,
                             batch_size=args.batch_size, shuffle=False, pin_memory=True,
                             num_workers=args.num_workers)
     }
@@ -96,10 +96,9 @@ def augmenting(args):
     # 3) Model loading
     cudnn.benchmark = True
     cls_criterion = nn.CrossEntropyLoss().to(device)
-    save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, f'{args.cls_scheduler}_{args.aug_num_epochs}_checkpoint.pth.tar')
+    save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, f'checkpoint.pth.tar')
     checkpoint = torch.load(save_file_name)
     model.load_state_dict(checkpoint['model'])
-    cls_model.load_state_dict(checkpoint['cls_model'])
     write_log(logger, f'Loaded augmenter model from {save_file_name}')
 
     #===================================#
@@ -109,100 +108,121 @@ def augmenting(args):
     start_time_e = time()
     write_log(logger, 'Augmenting start...')
     model.eval()
-    # cls_model.eval()
-    # seq_list = list()
-    # aug_list = dict()
-    # epsilon_list = [0, 1, 2, 3, 5, 8, 10]
-    # latent_pre_list = list()
-    # latent_now_list = list()
-    # latent_next_list = list()
 
-    # for i in epsilon_list:
-    #     aug_list[f'eps_{i}'] = list()
-    #     aug_list[f'eps_{i}_prob'] = list()
+    aug_sent_dict = {
+        'origin': [],
+        'recon': [],
+        'fgsm': []
+    }
+    aug_prob_dict = {
+        'origin': [],
+        'recon': [],
+        'fgsm': []
+    }
 
     for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
-
         # Input setting
         b_iter = input_to_device(batch_iter, device=device)
         src_sequence, src_att, src_seg, trg_label = b_iter
         trg_fliped_label = torch.flip(trg_label, dims=[1])
 
-        # Source De-tokenizing
+        # Source De-tokenizing for original sentence
         origin_source = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
-        origin_list.extend(origin_source)
+        print(origin_source)
+        aug_sent_dict['origin'].extend(origin_source)
+        aug_prob_dict['origin'].extend(trg_label.to('cpu').numpy().tolist())
 
-        # Encoding
+        # Recon - generate sentence
         with torch.no_grad():
             encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-            recon_out = model.generate(encoder_out=encoder_out, attention_mask=src_att, beam_size=args.beam_size,
-                                       beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
-            beam_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
+            if args.encoder_out_mix_ratio != 0:
+                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
 
-            inp_dict = model.tokenizer(beam_output,
-                                        max_length=args.src_max_len,
-                                        padding='max_length',
-                                        truncation=True,
-                                        return_tensors='pt')
+            if args.test_decoding_strategy == 'beam':
+                recon_out = model.generate(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att, beam_size=args.beam_size,
+                                           beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
+            elif args.test_decoding_strategy in ['greedy', 'multinomial', 'topk', 'topp']:
+                recon_out = model.generate_sample(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att,
+                                                  sampling_strategy=args.test_decoding_strategy, device=device,
+                                                  topk=args.topk, topp=args.topp, softmax_temp=args.multinomial_temperature)
+            decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
+            print(decoded_output)
 
-        # Classification for FGSM
+            # Get classification probability for decoded_output
+            classifier_out = model.classify(hidden_states=encoder_out)
+        aug_sent_dict['recon'].extend(decoded_output)
+        aug_prob_dict['recon'].extend(F.softmax(classifier_out, dim=1).to('cpu').numpy().tolist())
+
+        # FGSM - take gradient of classifier output w.r.t. encoder output
         encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
         classifier_out = model.classify(hidden_states=encoder_out_copy)
 
-        # Save results
-        aug_dict['eps_0'].extend(beam_output)
-        prob_dict['eps_0'].extend(F.softmax(classifier_out, dim=1))
-
-        #
         cls_loss = cls_criterion(classifier_out, trg_fliped_label)
         model.zero_grad()
         cls_loss.backward()
         encoder_out_copy_grad = encoder_out_copy.grad.data
-        encoder_out_copy_grad_sign = encoder_out_copy_grad.sign()
+        encoder_out_copy = encoder_out_copy + (args.fgsm_epsilon * encoder_out_copy_grad)
 
-        for step in range(51): # * 0.9
+        # FGSM - generate sentence
+        with torch.no_grad():
+            if args.encoder_out_mix_ratio != 0:
+                latent_out_copy, latent_encoder_out_copy = model.latent_encode(encoder_out=encoder_out)
+            else:
+                latent_out_copy = None
+                latent_encoder_out_copy = None
 
-            epsilon = 0.8 # Need to fix
+            if args.test_decoding_strategy == 'beam':
+                recon_out = model.generate(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att, beam_size=args.beam_size,
+                                           beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
+            elif args.test_decoding_strategy in ['greedy', 'multinomial', 'topk', 'topp']:
+                recon_out = model.generate_sample(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att,
+                                                  sampling_strategy=args.test_decoding_strategy, device=device,
+                                                  topk=args.topk, topp=args.topp, softmax_temp=args.multinomial_temperature)
+            decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
 
-            encoder_out_copy = encoder_out_copy + (epsilon * encoder_out_copy_grad_sign)
+            # Get classification probability for decoded_output
+            classifier_out_fgsm = model.classify(hidden_states=encoder_out_copy)
+        aug_sent_dict['fgsm'].extend(decoded_output)
+        aug_prob_dict['fgsm'].extend(F.softmax(classifier_out_fgsm, dim=1).to('cpu').numpy().tolist())
 
-            with torch.no_grad():
-                recon_out = model.generate(encoder_out=encoder_out_copy, attention_mask=src_att, beam_size=args.beam_size,
-                                        beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
-                beam_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
+    # POST-PROCESSING
+    processed_aug_seq = {}
+    processed_aug_seq['origin'] = {}
+    processed_aug_seq['recon'] = {}
+    processed_aug_seq['fgsm'] = {}
 
-                inp_dict = model.tokenizer(beam_output,
-                                            max_length=args.src_max_len,
-                                            padding='max_length',
-                                            truncation=True,
-                                            return_tensors='pt')
+    for phase in ['origin', 'recon', 'fgsm']:
+        encoded_dict = \
+            model.tokenizer(aug_sent_dict[phase],
+                            max_length=args.src_max_len,
+                            padding='max_length',
+                            truncation=True
+        )
+        processed_aug_seq[phase]['input_ids'] = encoded_dict['input_ids']
+        processed_aug_seq[phase]['attention_mask'] = encoded_dict['attention_mask']
+        if args.model_type == 'bert':
+            processed_aug_seq[phase]['token_type_ids'] = encoded_dict['token_type_ids']
+        processed_aug_seq[phase]['label'] = aug_prob_dict[phase]
 
-            # Classification for FGSM
-            encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-            classifier_out = model.classify(hidden_states=encoder_out_copy)
+    # Save with h5py
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
 
-            # Save results
-            if step in [10, 20, 30, 40, 50]:
-                aug_dict[f'eps_{step}'].extend(beam_output)
-                prob_dict[f'eps_{step}'].extend(F.softmax(classifier_out, dim=1))
+    with h5py.File(os.path.join(save_path, 'processed_aug.hdf5'), 'w') as f:
+        # origin data
+        f.create_dataset('train_src_input_ids', data=processed_aug_seq['origin']['input_ids'])
+        f.create_dataset('train_src_attention_mask', data=processed_aug_seq['origin']['attention_mask'])
+        f.create_dataset('train_label', data=processed_aug_seq['origin']['label'])
+        # recon data
+        f.create_dataset('train_recon_src_input_ids', data=processed_aug_seq['recon']['input_ids'])
+        f.create_dataset('train_recon_src_attention_mask', data=processed_aug_seq['recon']['attention_mask'])
+        f.create_dataset('train_recon_label', data=processed_aug_seq['recon']['label'])
+        # fgsm data
+        f.create_dataset('train_fgsm_src_input_ids', data=processed_aug_seq['fgsm']['input_ids'])
+        f.create_dataset('train_fgsm_src_attention_mask', data=processed_aug_seq['fgsm']['attention_mask'])
+        f.create_dataset('train_fgsm_label', data=processed_aug_seq['fgsm']['label'])
+        if args.model_type == 'bert':
+            f.create_dataset('train_src_token_type_ids', data=processed_aug_seq['origin']['token_type_ids'])
+            f.create_dataset('train_recon_src_token_type_ids', data=processed_aug_seq['recon']['token_type_ids'])
+            f.create_dataset('train_fgsm_src_token_type_ids', data=processed_aug_seq['fgsm']['token_type_ids'])
 
-            #
-            cls_loss = cls_criterion(classifier_out, trg_fliped_label)
-            model.zero_grad()
-            cls_loss.backward()
-            encoder_out_copy_grad = encoder_out_copy.grad.data
-            encoder_out_copy_grad_sign = encoder_out_copy_grad.sign()
-
-        if args.debuging_mode:
-            break
-
-    result_dat = pd.DataFrame({
-        'origin': origin_list,
-        'eps_0': aug_dict['eps_0'],
-        'eps_0_prob': prob_dict['eps_0']
-    })
-    for idx in [10, 20, 30, 40, 50]:
-        result_dat[f'eps_{idx}'] = aug_dict[f'eps_{idx}']
-        result_dat[f'eps_{idx}_prob'] = prob_dict[f'eps_{idx}']
-
-    result_dat.to_csv(f'./augmenting_result.csv', index=False)
+    print('Postprocessing Done!')

@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, RandomSampler
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 # Import custom modules
-from model.model import TransformerModel, ClassifierModel
+from model.model_sangmin import TransformerModel, ClassifierModel
 from model.dataset import CustomDataset
 from model.loss import compute_mmd, CustomLoss
 from optimizer.utils import shceduler_select, optimizer_select

@@ -56,8 +56,8 @@ if __name__=='__main__':
     # Model setting
     parser.add_argument('--isPreTrain', default=True, type=str2bool,
                         help='Use pre-trained language model; Default is True')
-    parser.add_argument('--model_type', default='bert', type=str,
-                        help='Augmentation model type; Default is BERT')
+    parser.add_argument('--model_type', default='bart', type=str,
+                        help='Augmentation model type; Default is BART')
     parser.add_argument('--classify_method', default='latent_out', type=str, choices=['encoder_out', 'latnet_out'],
                         help='')
     parser.add_argument('--encoder_out_mix_ratio', default=0.3, type=float,
@@ -81,9 +81,9 @@ if __name__=='__main__':
                         help="Choose optimizer setting in 'AdamW', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--aug_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
-    parser.add_argument('--cls_lr', default=5e-4, type=float,
+    parser.add_argument('--cls_lr', default=1e-5, type=float,
                         help='Maximum learning rate of warmup scheduler; Default is 5e-4')
-    parser.add_argument('--aug_lr', default=5e-4, type=float,
+    parser.add_argument('--aug_lr', default=5e-5, type=float,
                         help='Maximum learning rate of warmup scheduler; Default is 5e-4')
     parser.add_argument('--n_warmup_epochs', default=2, type=float,
                         help='Wamrup epochs when using warmup scheduler; Default is 2')
@@ -94,9 +94,9 @@ if __name__=='__main__':
                         help="Sentences's minimum length; Default is 4")
     parser.add_argument('--src_max_len', default=200, type=int,
                         help="Sentences's minimum length; Default is 200")
-    parser.add_argument('--aug_num_epochs', default=10, type=int,
+    parser.add_argument('--aug_num_epochs', default=5, type=int,
                         help='Augmenter training epochs; Default is 10')
-    parser.add_argument('--cls_num_epochs', default=10, type=int,
+    parser.add_argument('--cls_num_epochs', default=3, type=int,
                         help='Classifier training epochs; Default is 10')
     parser.add_argument('--num_workers', default=8, type=int,
                         help='Num CPU Workers; Default is 8')
@@ -117,16 +117,24 @@ if __name__=='__main__':
     parser.add_argument('--z_variation', default=2, type=float,
                         help='')
     # Testing setting
-    parser.add_argument('--epsilon', default=0.8, type=float,
+    parser.add_argument('--fgsm_epsilon', default=0.8, type=float,
                         help='')
     parser.add_argument('--test_batch_size', default=32, type=int,
                         help='Test batch size; Default is 32')
+    parser.add_argument('--test_decoding_strategy', default='beam', choices=['greedy', 'beam', 'multinomial', 'topk', 'topp'], type=str,
+                        help='Decoding strategy for test; Default is beam')
     parser.add_argument('--beam_size', default=5, type=int,
                         help='Beam search size; Default is 5')
     parser.add_argument('--beam_alpha', default=0.7, type=float,
                         help='Beam search length normalization; Default is 0.7')
     parser.add_argument('--repetition_penalty', default=1.3, type=float,
                         help='Beam search repetition penalty term; Default is 1.3')
+    parser.add_argument('--topk', default=5, type=int,
+                        help='Topk sampling size; Default is 5')
+    parser.add_argument('--topp', default=0.9, type=float,
+                        help='Topk sampling size; Default is 0.9')
+    parser.add_argument('--multinomial_temperature', default=3.0, type=float,
+                        help='Multinomial sampling temperature; Default is 3.0')
     # Seed & Logging setting
     parser.add_argument('--seed', default=42, type=int,
                         help='Random seed; Default is 42')
