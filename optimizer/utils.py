@@ -41,8 +41,8 @@ def shceduler_select(phase, scheduler_model, optimizer, dataloader_len, args):
     if scheduler_model == 'constant':
         scheduler = StepLR(optimizer, step_size=dataloader_len, gamma=1)
     elif scheduler_model == 'warmup':
-        scheduler = WarmupLinearSchedule(optimizer, 
-                                        warmup_steps=int(dataloader_len*args.n_warmup_epochs), 
+        scheduler = WarmupLinearSchedule(optimizer,
+                                        warmup_steps=int(dataloader_len*args.n_warmup_epochs),
                                         t_total=dataloader_len*num_epochs)
     elif scheduler_model == 'reduce_train':
         scheduler = ReduceLROnPlateau(optimizer, 'min', patience=int(dataloader_len*1.5),

@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
+from tqdm.auto import tqdm
 
 from datasets import load_dataset
 
@@ -26,17 +27,17 @@ def data_load(args):
 
     if args.data_name == 'IMDB':
         dataset = load_dataset("imdb")
-        
+
         train_dat = dataset['train']
         test_dat = dataset['test']
 
         train_index, valid_index, test_index = data_split_index(train_dat, valid_ratio=args.valid_ratio, test_ratio=0)
 
-        src_list['train'] = [train_dat['text'][i] for i in train_index]
-        trg_list['train'] = [train_dat['label'][i] for i in train_index]
+        src_list['train'] = [train_dat['text'][i] for i in tqdm(train_index)]
+        trg_list['train'] = [train_dat['label'][i] for i in tqdm(train_index)]
 
-        src_list['valid'] = [train_dat['text'][i] for i in valid_index]
-        trg_list['valid'] = [train_dat['label'][i] for i in valid_index]
+        src_list['valid'] = [train_dat['text'][i] for i in tqdm(valid_index)]
+        trg_list['valid'] = [train_dat['label'][i] for i in tqdm(valid_index)]
 
         src_list['test'] = test_dat['text']
         trg_list['test'] = test_dat['label']
@@ -127,7 +128,7 @@ def data_load(args):
         trg_list['valid'] = valid_dat['label'].tolist()
         src_list['test'] = test_dat['comments'].tolist()
         trg_list['test'] = [0 for _ in range(len(test_dat))]
-        
+
     return src_list, trg_list
 
 def tokenizing(args, src_list, tokenizer):
@@ -135,6 +136,7 @@ def tokenizing(args, src_list, tokenizer):
     processed_sequences['train'] = dict()
     processed_sequences['valid'] = dict()
     processed_sequences['test'] = dict()
+
 
     if args.data_name in ['mnli', 'mrpc']:
         for phase in ['train', 'valid', 'test']:
@@ -178,5 +180,5 @@ def input_to_device(batch_iter, device):
     src_att = src_att.to(device, non_blocking=True)
     src_seg = src_seg.to(device, non_blocking=True)
     trg_label = trg_label.to(device, non_blocking=True)
-    
+
     return src_sequence, src_att, src_seg, trg_label
