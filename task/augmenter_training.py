@@ -70,7 +70,7 @@ def augmenter_training(args):
         else:
             train_src_token_type_ids = list()
             valid_src_token_type_ids = list()
-        
+
     with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
         data_ = pickle.load(f)
         src_word2id = data_['src_word2id']
@@ -87,7 +87,7 @@ def augmenter_training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(model_type=args.model_type, isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio, 
+    model = TransformerModel(model_type=args.model_type, isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
                              encoder_out_cross_attention=args.encoder_out_cross_attention,
                              encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
                              src_max_len=args.src_max_len, num_labels=num_labels, dropout=args.dropout)
@@ -150,7 +150,7 @@ def augmenter_training(args):
     write_log(logger, 'Traing start!')
     best_aug_val_loss = 1e+4
     best_cls_val_loss = 1e+4
-    
+
     for epoch in range(start_epoch + 1, args.cls_num_epochs + 1):
         start_time_e = time()
 
@@ -211,7 +211,7 @@ def augmenter_training(args):
 
             b_iter = input_to_device(batch_iter, device=device)
             src_sequence, src_att, src_seg, trg_label = b_iter
-        
+
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
                 hidden_states = encoder_out
@@ -242,7 +242,7 @@ def augmenter_training(args):
         write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint22.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
         if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -307,7 +307,7 @@ def augmenter_training(args):
         #===================================#
         write_log(logger, 'Augmenter validation start...')
 
-        # Validation 
+        # Validation
         model.eval()
         val_recon_loss = 0
 
@@ -315,7 +315,7 @@ def augmenter_training(args):
 
             b_iter = input_to_device(batch_iter, device=device)
             src_sequence, src_att, src_seg, trg_label = b_iter
-        
+
             # Encoding
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
@@ -323,7 +323,7 @@ def augmenter_training(args):
                 if args.encoder_out_mix_ratio != 0:
                     latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
 
-                # Reconstruction 
+                # Reconstruction
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
                 recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
@@ -335,7 +335,7 @@ def augmenter_training(args):
         val_recon_loss /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint22.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -390,12 +390,12 @@ def augmenter_training(args):
             # Reconstruction Output Tokenizing & Pre-processing
             detokenized = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
             eps_dict['eps_0'] = detokenized[0]
-            inp_dict = model.tokenizer(detokenized, max_length=args.src_max_len, 
+            inp_dict = model.tokenizer(detokenized, max_length=args.src_max_len,
                                        padding='max_length', truncation=True, return_tensors='pt')
 
             # Probability Calculate
             with torch.no_grad():
-                encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device), 
+                encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device),
                                                  attention_mask=inp_dict['attention_mask'].to(device))
                 hidden_states = encoder_out_eps_0
 
@@ -416,9 +416,9 @@ def augmenter_training(args):
             # FGSM
             if args.classify_method == 'latent_out':
                 encoder_out_copy = encoder_out.clone().detach()
-                latent_out_copy = hidden_states_grad_true - (args.epsilon * hidden_states_grad)
+                latent_out_copy = hidden_states_grad_true - (args.fgsm_epsilon * hidden_states_grad)
             else:
-                encoder_out_copy = hidden_states_grad_true - (args.epsilon * hidden_states_grad)
+                encoder_out_copy = hidden_states_grad_true - (args.fgsm_epsilon * hidden_states_grad)
                 latent_out_copy = None
 
             with torch.no_grad():
@@ -434,7 +434,7 @@ def augmenter_training(args):
 
             # Probability Calculate
             with torch.no_grad():
-                encoder_out_eps_1 = model.encode(input_ids=inp_dict['input_ids'].to(device), 
+                encoder_out_eps_1 = model.encode(input_ids=inp_dict['input_ids'].to(device),
                                                  attention_mask=inp_dict['attention_mask'].to(device))
                 hidden_states = encoder_out_eps_1
 
@@ -447,7 +447,7 @@ def augmenter_training(args):
             prob_dict['eps_1'] = F.softmax(classifier_out)[0]
 
             dict_key = prob_dict.keys()
-            
+
             write_log(logger, f'Generated Examples')
             write_log(logger, f'Phase: {phase}')
             write_log(logger, f'Source: {src_output}')

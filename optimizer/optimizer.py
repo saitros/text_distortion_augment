@@ -178,9 +178,9 @@ class Ralamb(Optimizer):
 
                 # Decay the first and second moment running average coefficient
                 # m_t
-                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1) 
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
                 # v_t
-                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2) 
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
                 state['step'] += 1
                 buffered = self.buffer[int(state['step'] % 10)]

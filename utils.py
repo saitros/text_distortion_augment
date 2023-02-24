@@ -11,41 +11,41 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-def str2bool(v): 
-    if isinstance(v, bool): 
-        return v 
-    if v.lower() in ('yes', 'true', 't', 'y', '1'): 
-        return True 
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'): 
-        return False 
-    else: 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def path_check(args):
     # Preprocessing Path Checking
     #(args.preprocess_path, args.task, args.data_name, args.tokenizer)
     if not os.path.exists(args.preprocess_path):
-        os.mkdir(args.preprocess_path)
+        os.makedirs(args.preprocess_path)
 
     if not os.path.exists(os.path.join(args.preprocess_path, args.data_name)):
-        os.mkdir(os.path.join(args.preprocess_path, args.data_name))
+        os.makedirs(os.path.join(args.preprocess_path, args.data_name))
 
     if not os.path.exists(os.path.join(args.preprocess_path, args.data_name, args.model_type)):
-        os.mkdir(os.path.join(args.preprocess_path, args.data_name, args.model_type))
+        os.makedirs(os.path.join(args.preprocess_path, args.data_name, args.model_type))
 
     # Model Checkpoint Path Checking
     if not os.path.exists(args.model_save_path):
-        os.mkdir(args.model_save_path)
+        os.makedirs(args.model_save_path)
 
     if not os.path.exists(os.path.join(args.model_save_path, args.data_name)):
-        os.mkdir(os.path.join(args.model_save_path, args.data_name))
+        os.makedirs(os.path.join(args.model_save_path, args.data_name))
 
     if not os.path.exists(os.path.join(args.model_save_path, args.data_name, args.model_type)):
-        os.mkdir(os.path.join(args.model_save_path, args.data_name, args.model_type))
+        os.makedirs(os.path.join(args.model_save_path, args.data_name, args.model_type))
 
     # Testing Results Path Checking
     if not os.path.exists(args.result_path):
-        os.mkdir(args.result_path)
+        os.makedirs(args.result_path)
 
 class TqdmLoggingHandler(logging.Handler):
     def __init__(self, level=logging.DEBUG):
@@ -86,7 +86,7 @@ def get_tb_exp_name(args:argparse.Namespace):
 
     if args.training:
         exp_name += 'TRAIN - '
-        exp_name += "BS=%i_" % args.batch_size 
+        exp_name += "BS=%i_" % args.batch_size
         exp_name += "EP=%i_" % args.num_epochs
         exp_name += "LR=%.4f_" % args.lr
     elif args.testing:
