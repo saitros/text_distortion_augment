@@ -137,19 +137,6 @@ def tokenizing(args, src_list, tokenizer):
     processed_sequences['valid'] = dict()
     processed_sequences['test'] = dict()
 
-    if args.data_name in ['IMDB', 'sst2', 'cola', 'korean_hate_speech']:
-        for phase in ['train', 'valid', 'test']:
-            encoded_dict = \
-            tokenizer(
-                src_list[phase],
-                max_length=args.src_max_len,
-                padding='max_length',
-                truncation=True
-            )
-            processed_sequences[phase]['input_ids'] = encoded_dict['input_ids']
-            processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
-            if args.model_type == 'bert':
-                processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
 
     if args.data_name in ['mnli', 'mrpc']:
         for phase in ['train', 'valid', 'test']:
@@ -164,6 +151,21 @@ def tokenizing(args, src_list, tokenizer):
             processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
             if args.model_type == 'bert':
                 processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
+
+    else:
+        for phase in ['train', 'valid', 'test']:
+            encoded_dict = \
+            tokenizer(
+                src_list[phase],
+                max_length=args.src_max_len,
+                padding='max_length',
+                truncation=True
+            )
+            processed_sequences[phase]['input_ids'] = encoded_dict['input_ids']
+            processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
+            if args.model_type == 'bert':
+                processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
+
 
     return processed_sequences
 
