@@ -1,7 +1,7 @@
-from transformers import PretrainedConfig, AutoModel, AutoTokenizer
+from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 def model_setting(model_name, isPreTrain):
-    model_config = PretrainedConfig.from_pretrained(model_name)
+    model_config = AutoConfig.from_pretrained(model_name)
 
     if isPreTrain:
         basemodel = AutoModel.from_pretrained(model_name)
