@@ -56,7 +56,9 @@ if __name__=='__main__':
     # Model setting
     parser.add_argument('--isPreTrain', default=True, type=str2bool,
                         help='Use pre-trained language model; Default is True')
-    parser.add_argument('--model_type', default='bart', type=str,
+    parser.add_argument('--encoder_model_type', default='bart', type=str,
+                        help='Classification model type; Default is BART')
+    parser.add_argument('--decoder_model_type', default='bart', type=str,
                         help='Augmentation model type; Default is BART')
     parser.add_argument('--classify_method', default='latent_out', type=str, choices=['encoder_out', 'latnet_out'],
                         help='')

@@ -87,7 +87,8 @@ def augmenter_training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(model_type=args.model_type, isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
+    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type, 
+                             isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
                              encoder_out_cross_attention=args.encoder_out_cross_attention,
                              encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
                              src_max_len=args.src_max_len, num_labels=num_labels, dropout=args.dropout)
