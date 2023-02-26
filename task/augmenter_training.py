@@ -368,9 +368,12 @@ def augmenter_training(args):
             src_output = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
 
             # Target Label Setting
-            fliped_trg_label = torch.flip(trg_label, dims=[1]).to(device)
+            if args.label_flipping:
+                fliped_trg_label = torch.flip(trg_label, dims=[1]).to(device)
+            else:
+                fliped_trg_label = torch.ones_like(trg_label) * 0.5
 
-            # Original Reconstruction
+            # Forward
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
                 hidden_states = encoder_out
@@ -382,12 +385,13 @@ def augmenter_training(args):
                 classifier_out = model.classify(hidden_states=hidden_states)
                 src_output_prob = F.softmax(classifier_out)[0]
 
+                # Reconstruction
                 latent_out = None
                 if args.encoder_out_mix_ratio != 0:
                     latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
-            # Reconstruction Output Tokenizing & Pre-processing
+            # Output Tokenizing & Pre-processing
             detokenized = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
             eps_dict['eps_0'] = detokenized[0]
             inp_dict = model.tokenizer(detokenized, max_length=args.src_max_len,
@@ -410,16 +414,21 @@ def augmenter_training(args):
             model.zero_grad()
             cls_loss = cls_criterion(classifier_out, fliped_trg_label)
             cls_loss.backward()
-            hidden_states_grad = hidden_states_grad_true.grad.data
-            hidden_states_grad = hidden_states_grad.sign()
-
-            # FGSM
+            hidden_states_grad = hidden_states_grad_true.grad.data.sign()
+            
+            # Gradient-based Modification
             if args.classify_method == 'latent_out':
                 encoder_out_copy = encoder_out.clone().detach()
-                latent_out_copy = hidden_states_grad_true - (args.fgsm_epsilon * hidden_states_grad)
+                latent_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                hidden_states_grad_true = latent_out_copy.clone()
             else:
-                encoder_out_copy = hidden_states_grad_true - (args.fgsm_epsilon * hidden_states_grad)
+                encoder_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
                 latent_out_copy = None
+                hidden_states_grad_true = encoder_out_copy.clone()
+
+            hidden_states_grad_true = hidden_states_grad_true.clone().detach().requires_grad_(True)
+            classifier_out = model.classify(hidden_states=hidden_states_grad_true)
+            revised_prob = F.softmax(classifier_out)[0]
 
             with torch.no_grad():
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
@@ -451,8 +460,11 @@ def augmenter_training(args):
             write_log(logger, f'Generated Examples')
             write_log(logger, f'Phase: {phase}')
             write_log(logger, f'Source: {src_output}')
-            write_log(logger, f'Augmented_origin: {eps_dict["eps_0"]}')
-            write_log(logger, f'Augmented_origin Probability: {prob_dict["eps_0"]}')
+            write_log(logger, f'Source Probability: {src_output_prob}')
+            write_log(logger, f'Reconstructed: {eps_dict["eps_0"]}')
+            write_log(logger, f'Reconstructed Probability: {prob_dict["eps_0"]}')
+            write_log(logger, '-'*50)
+            write_log(logger, f'Revised Probability: {revised_prob}')
             write_log(logger, f'Augmented: {eps_dict["eps_1"]}')
             write_log(logger, f'Augmented Probability: {prob_dict["eps_1"]}')
 

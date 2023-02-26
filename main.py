@@ -70,6 +70,8 @@ if __name__=='__main__':
                         help='Add decoder output and latent output to augmenter; Default is True')
     parser.add_argument('--latent_mmd_loss', default=False, type=str2bool,
                         help='')
+    parser.add_argument('--label_flipping', default=False, type=str2bool,
+                        help='')
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']
@@ -118,7 +120,7 @@ if __name__=='__main__':
     parser.add_argument('--z_variation', default=2, type=float,
                         help='')
     # Testing setting
-    parser.add_argument('--fgsm_epsilon', default=0.8, type=float,
+    parser.add_argument('--grad_epsilon', default=0.001, type=float,
                         help='')
     parser.add_argument('--test_batch_size', default=32, type=int,
                         help='Test batch size; Default is 32')
