@@ -10,7 +10,7 @@ def encoder_model_setting(model_name, isPreTrain):
 
     encoder = basemodel.encoder
 
-    return encoder, decoder, model_config
+    return encoder, model_config
 
 def decoder_model_setting(model_name, isPreTrain):
     model_config = AutoConfig.from_pretrained(model_name)
@@ -22,4 +22,4 @@ def decoder_model_setting(model_name, isPreTrain):
 
     decoder = basemodel.decoder
 
-    return encoder, decoder, model_config
+    return decoder, model_config

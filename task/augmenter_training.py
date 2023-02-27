@@ -53,7 +53,7 @@ def augmenter_training(args):
     write_log(logger, "Load data...")
     gc.disable()
 
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
 
     with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed.hdf5'), 'r') as f:
         train_src_input_ids = f.get('train_src_input_ids')[:]
@@ -64,7 +64,7 @@ def augmenter_training(args):
         train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
         valid_trg_list = f.get('valid_label')[:]
         valid_trg_list = F.one_hot(torch.tensor(valid_trg_list, dtype=torch.long)).numpy()
-        if args.model_type == 'bert':
+        if args.encoder_model_type == 'bert':
             train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
             valid_src_token_type_ids = f.get('valid_src_token_type_ids')[:]
         else:
@@ -133,7 +133,7 @@ def augmenter_training(args):
     cls_training_done = False
     if args.resume:
         write_log(logger, 'Resume model...')
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
         checkpoint = torch.load(save_file_name)
         cls_training_done = checkpoint['cls_training_done']
         start_epoch = checkpoint['epoch'] - 1
@@ -243,7 +243,7 @@ def augmenter_training(args):
         write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
         if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -336,7 +336,7 @@ def augmenter_training(args):
         val_recon_loss /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -412,24 +412,26 @@ def augmenter_training(args):
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
             prob_dict['eps_0'] = F.softmax(classifier_out)[0]
 
-            model.zero_grad()
-            cls_loss = cls_criterion(classifier_out, fliped_trg_label)
-            cls_loss.backward()
-            hidden_states_grad = hidden_states_grad_true.grad.data.sign()
-            
-            # Gradient-based Modification
-            if args.classify_method == 'latent_out':
-                encoder_out_copy = encoder_out.clone().detach()
-                latent_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
-                hidden_states_grad_true = latent_out_copy.clone()
-            else:
-                encoder_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
-                latent_out_copy = None
-                hidden_states_grad_true = encoder_out_copy.clone()
+            for _ in range(3):
 
-            hidden_states_grad_true = hidden_states_grad_true.clone().detach().requires_grad_(True)
-            classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            revised_prob = F.softmax(classifier_out)[0]
+                model.zero_grad()
+                cls_loss = cls_criterion(classifier_out, fliped_trg_label)
+                cls_loss.backward()
+                hidden_states_grad = hidden_states_grad_true.grad.data.sign()
+                
+                # Gradient-based Modification
+                if args.classify_method == 'latent_out':
+                    encoder_out_copy = encoder_out.clone().detach()
+                    latent_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                    hidden_states_grad_true = latent_out_copy.clone()
+                else:
+                    encoder_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                    latent_out_copy = None
+                    hidden_states_grad_true = encoder_out_copy.clone()
+
+                hidden_states_grad_true = hidden_states_grad_true.clone().detach().requires_grad_(True)
+                classifier_out = model.classify(hidden_states=hidden_states_grad_true)
+                revised_prob = F.softmax(classifier_out)[0]
 
             with torch.no_grad():
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)

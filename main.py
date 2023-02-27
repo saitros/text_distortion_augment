@@ -60,7 +60,7 @@ if __name__=='__main__':
                         help='Classification model type; Default is BART')
     parser.add_argument('--decoder_model_type', default='bart', type=str,
                         help='Augmentation model type; Default is BART')
-    parser.add_argument('--classify_method', default='latent_out', type=str, choices=['encoder_out', 'latnet_out'],
+    parser.add_argument('--classify_method', default='latent_out', type=str, choices=['encoder_out', 'latent_out'],
                         help='')
     parser.add_argument('--encoder_out_mix_ratio', default=0.3, type=float,
                         help='Encoder output ratio to input of decoder; Default is 0.3')

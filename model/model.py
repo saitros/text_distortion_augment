@@ -49,19 +49,19 @@ class TransformerModel(nn.Module):
         # Encoder model setting
         self.encoder_model_type = encoder_model_type
         encoder_model_name = return_model_name(self.encoder_model_type)
-        encoder, encoder_model_config = model_setting(encoder_model_name, self.isPreTrain)
+        encoder, encoder_model_config = encoder_model_setting(encoder_model_name, self.isPreTrain)
 
         # Encoder model setting
         self.decoder_model_type = decoder_model_type
         decoder_model_name = return_model_name(self.decoder_model_type)
-        decoder, decoder_model_config = model_setting(decoder_model_name, self.isPreTrain)
+        decoder, decoder_model_config = decoder_model_setting(decoder_model_name, self.isPreTrain)
 
         self.encoder_model_config = encoder_model_config
         self.decoder_model_config = decoder_model_config
-        self.d_hidden = model_config.d_model
+        self.d_hidden = encoder_model_config.d_model
         self.d_embedding = int(self.d_hidden / 2)
         self.num_labels = num_labels
-        self.vocab_num = model_config.vocab_size
+        self.vocab_num = decoder_model_config.vocab_size
 
         # Encoder setting
         self.encoder = encoder
@@ -83,10 +83,10 @@ class TransformerModel(nn.Module):
         self.decoder_augmenter = nn.Linear(self.d_embedding, self.vocab_num)
 
         # Tokenizer Setting
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(decoder_model_name)
         self.pad_idx = self.tokenizer.pad_token_id
-        self.decoder_start_token_id = self.model_config.decoder_start_token_id
-        if self.model_type == 'bert':
+        self.decoder_start_token_id = self.decoder_model_config.decoder_start_token_id
+        if self.decoder_model_type == 'bert':
             self.bos_idx = self.tokenizer.cls_token_id
             self.eos_idx = self.tokenizer.sep_token_id
         else:
@@ -128,6 +128,7 @@ class TransformerModel(nn.Module):
                 encoder_hidden_states = encoder_out
             elif self.encoder_out_mix_ratio == 0:
                 encoder_hidden_states = latent_out
+                attention_mask = None
             else:
                 encoder_hidden_states = torch.add((self.encoder_out_mix_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
         else:
