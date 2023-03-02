@@ -76,8 +76,11 @@ def augmenting(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len,
-                                 isPreTrain=args.isPreTrain, num_labels=num_labels, dropout=args.dropout)
+    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type, 
+                             isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
+                             encoder_out_cross_attention=args.encoder_out_cross_attention,
+                             encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
+                             src_max_len=args.src_max_len, num_labels=num_labels, dropout=args.dropout)
     model.to(device)
 
     # 2) Dataloader setting
@@ -87,11 +90,11 @@ def augmenting(args):
                                trg_list=train_trg_list, src_max_len=args.src_max_len)
     }
     dataloader_dict = {
-        'train': DataLoader(dataset_dict['train'][:50], drop_last=False,
-                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
-                            num_workers=args.num_workers)
+        'train': DataLoader(dataset_dict['train'], drop_last=True,
+                            batch_size=args.batch_size, shuffle=True,
+                            pin_memory=True, num_workers=args.num_workers)
     }
-    write_log(logger, f"Total number of trainingsets iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
+    write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
 
     # 3) Model loading
     cudnn.benchmark = True
