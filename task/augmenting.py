@@ -213,7 +213,13 @@ def augmenting(args):
         processed_aug_seq[phase]['attention_mask'] = encoded_dict['attention_mask']
         if args.model_type == 'bert':
             processed_aug_seq[phase]['token_type_ids'] = encoded_dict['token_type_ids']
-        processed_aug_seq[phase]['label'] = aug_prob_dict[phase]
+
+        if args.augmenting_label == 'soft':
+            processed_aug_seq[phase]['label'] = aug_prob_dict[phase]
+        elif args.augmenting_label == 'hard':
+            processed_aug_seq[phase]['label'] = torch.argmax(aug_prob_dict[phase], dim=1) # Need Check
+        else:
+            raise ValueError
 
     # Save with h5py
     save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)

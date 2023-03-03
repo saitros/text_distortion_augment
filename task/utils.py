@@ -137,7 +137,6 @@ def tokenizing(args, src_list, tokenizer):
     processed_sequences['valid'] = dict()
     processed_sequences['test'] = dict()
 
-
     if args.data_name in ['mnli', 'mrpc']:
         for phase in ['train', 'valid', 'test']:
             encoded_dict = \
