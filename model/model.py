@@ -309,9 +309,11 @@ class TransformerModel(nn.Module):
             # Next word probability
             scores = F.gelu(self.decoder_linear(decoder_outputs[:,-1])) # (batch_size, d_embedding)
             scores = self.decoder_augmenter(self.decoder_norm(scores)) # (batch_size, vocab_num)
+            
             # Avoid generating <pad> and <s> token and apply softmax temperature
-            scores[:, self.pad_idx] = float('-inf')
-            scores[:, self.bos_idx] = float('-inf')
+            if step == 0:
+                scores[:, self.pad_idx] = float('-inf')
+                scores[:, self.bos_idx] = float('-inf')
             scores = scores / softmax_temp
             next_word_prob = F.softmax(scores, dim=1) # (batch_size, vocab_num)
 
@@ -341,7 +343,7 @@ class TransformerModel(nn.Module):
             # Concatenate generated token to sequence
             next_word = next_word.unsqueeze(1) # (batch_size, 1)
             seqs = torch.cat([seqs, next_word], dim=1) # (batch_size, seq_len + 1)
-            
+
         # Postprocessing - remove generated tokens after <eos> token
         seqs = seqs.tolist()
         for i in range(batch_size):

@@ -153,7 +153,7 @@ def augmenting(args):
             elif args.test_decoding_strategy == 'beam':
                 recon_out = model.generate(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att, beam_size=args.beam_size,
                                            beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
-            elif args.test_decoding_strategy in ['greedy', 'multinomial', 'topk', 'topp']:
+            elif args.test_decoding_strategy in ['multinomial', 'topk', 'topp']:
                 recon_out = model.generate_sample(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att,
                                                   sampling_strategy=args.test_decoding_strategy, device=device,
                                                   topk=args.topk, topp=args.topp, softmax_temp=args.multinomial_temperature)
