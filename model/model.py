@@ -341,9 +341,7 @@ class TransformerModel(nn.Module):
             # Concatenate generated token to sequence
             next_word = next_word.unsqueeze(1) # (batch_size, 1)
             seqs = torch.cat([seqs, next_word], dim=1) # (batch_size, seq_len + 1)
-
-        print(seqs)
-        return seqs
+            
         # Postprocessing - remove generated tokens after <eos> token
         seqs = seqs.tolist()
         for i in range(batch_size):
