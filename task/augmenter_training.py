@@ -316,7 +316,7 @@ def augmenter_training(args):
                 hidden_states = latent_out
 
             re_classifier_out = model.classify(hidden_states=hidden_states)
-            cls_loss2 = cls_criterion(re_classifier_out, classifier_out)
+            cls_loss2 = cls_criterion(re_classifier_out, classifier_out.softmax(dim=1))
 
             # Loss Backward
             total_loss = recon_loss + cls_loss2
