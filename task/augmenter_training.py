@@ -261,6 +261,21 @@ def augmenter_training(args):
             else_log = f'Still {best_cls_epoch} epoch Loss({round(best_cls_val_loss.item(), 2)}) is better...'
             write_log(logger, else_log)
 
+    for para in model.encoder.parameters():
+        para.requires_grad = False
+    for para in model.latent_encoder.parameters():
+        para.requires_grad = False
+    for para in model.latent_decoder.parameters():
+        para.requires_grad = False
+    for para in model.classifier1.parameters():
+        para.requires_grad = False
+    for para in model.classifier1.parameters():
+        para.requires_grad = False
+    for para in model.classifier2.parameters():
+        para.requires_grad = False
+    for para in model.classifier3.parameters():
+        para.requires_grad = False
+
     for epoch in range(start_epoch + 1, args.aug_num_epochs + 1):
         start_time_e = time()
 
@@ -279,15 +294,33 @@ def augmenter_training(args):
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
                 latent_out = None
+                hidden_states = encoder_out
                 if args.encoder_out_mix_ratio != 0:
                     latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                    hidden_states = latent_out
+
+            # Classifier Results
+            with torch.no_grad():
+                classifier_out = model.classify(hidden_states=hidden_states)
 
             # Reconstruction
             recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
+            # Additional Loss
+            encoder_out = model.encode(input_ids=recon_out)
+            latent_out = None
+            hidden_states = encoder_out
+            if args.encoder_out_mix_ratio != 0:
+                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                hidden_states = latent_out
+
+            re_classifier_out = model.classify(hidden_states=hidden_states)
+            cls_loss2 = cls_criterion(re_classifier_out, classifier_out)
+
             # Loss Backward
-            recon_loss.backward()
+            total_loss = recon_loss + cls_loss2
+            total_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(model.parameters(), args.clip_grad_norm)
             aug_optimizer.step()
@@ -296,8 +329,8 @@ def augmenter_training(args):
             # Print loss value only training
             if i == 0 or i % args.print_freq == 0 or i == len(dataloader_dict['train'])-1:
                 # train_acc = (recon_out.view(-1, src_vocab_num).argmax(dim=1) == src_sequence.contiguous().view(-1)).sum() / len(src_sequence)
-                iter_log = "[Epoch:%03d][%03d/%03d] train_recon_loss:%03.2f | learning_rate:%1.6f |spend_time:%02.2fmin" % \
-                    (epoch, i, len(dataloader_dict['train'])-1, recon_loss.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                iter_log = "[Epoch:%03d][%03d/%03d] train_recon_loss:%03.2f | train_cls2_loss:%03.2f | learning_rate:%1.6f |spend_time:%02.2fmin" % \
+                    (epoch, i, len(dataloader_dict['train'])-1, recon_loss.item(), cls_loss2.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                 write_log(logger, iter_log)
 
             if args.debuging_mode:
@@ -359,6 +392,21 @@ def augmenter_training(args):
         #===================================#
 
         eps_dict, prob_dict = dict(), dict()
+
+        for para in model.encoder.parameters():
+            para.requires_grad = True
+        for para in model.latent_encoder.parameters():
+            para.requires_grad = True
+        for para in model.latent_decoder.parameters():
+            para.requires_grad = True
+        for para in model.classifier1.parameters():
+            para.requires_grad = True
+        for para in model.classifier1.parameters():
+            para.requires_grad = True
+        for para in model.classifier2.parameters():
+            para.requires_grad = True
+        for para in model.classifier3.parameters():
+            para.requires_grad = True
 
         for phase in ['train', 'valid']:
             example_iter = next(iter(dataloader_dict[phase]))
@@ -477,3 +525,7 @@ def augmenter_training(args):
     write_log(logger, f'Best AUG Loss: {round(best_aug_val_loss.item(), 2)}')
     write_log(logger, f'Best CLS Epoch: {best_cls_epoch}')
     write_log(logger, f'Best CLS Loss: {round(best_cls_val_loss.item(), 2)}')
+
+# 1. 단순 reconstruction때는 [0,1]로 문장 나오면 되고
+# 2. augment 한거는 옮겨진 만큼으로 나오면 되고
+# 1 학습 하고 2 학습 하고
