@@ -319,7 +319,10 @@ def augmenter_training(args):
             cls_loss2 = cls_criterion(re_classifier_out, classifier_out.softmax(dim=1))
 
             # Loss Backward
-            total_loss = recon_loss + cls_loss2
+            if epoch <= 3:
+                total_loss = recon_loss + cls_loss2
+            else:
+                total_loss = cls_loss2
             total_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(model.parameters(), args.clip_grad_norm)
