@@ -93,12 +93,12 @@ class TransformerModel(nn.Module):
             self.bos_idx = self.tokenizer.bos_token_id
             self.eos_idx = self.tokenizer.eos_token_id
 
-    def encode(self, input_ids, attention_mask=None, type='a'):
-        if type=='a':
+    def encode(self, input_ids, attention_mask=None):
+        if input_ids.dtype == torch.int64:
             encoder_out = self.encoder(input_ids=input_ids,
                                     attention_mask=attention_mask)
         else:
-            encoder_out = self.encoder(input_embeds=input_ids,
+            encoder_out = self.encoder(inputs_embeds=input_ids,
                                     attention_mask=attention_mask)
         encoder_out = encoder_out['last_hidden_state'] # (batch_size, seq_len, d_hidden)
 

@@ -308,7 +308,7 @@ def augmenter_training(args):
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
             # Additional Loss
-            encoder_out = model.encode(input_ids=recon_out)
+            encoder_out = model.encode(input_ids=recon_out.argmax(dim=2))
             latent_out = None
             hidden_states = encoder_out
             if args.encoder_out_mix_ratio != 0:
