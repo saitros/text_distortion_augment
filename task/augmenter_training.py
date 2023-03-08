@@ -243,7 +243,7 @@ def augmenter_training(args):
         write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint234.pth.tar')
         if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -261,26 +261,26 @@ def augmenter_training(args):
             else_log = f'Still {best_cls_epoch} epoch Loss({round(best_cls_val_loss.item(), 2)}) is better...'
             write_log(logger, else_log)
 
-    for para in model.encoder.parameters():
-        para.requires_grad = False
-    for para in model.latent_encoder.parameters():
-        para.requires_grad = False
-    for para in model.latent_decoder.parameters():
-        para.requires_grad = False
-    for para in model.classifier1.parameters():
-        para.requires_grad = False
-    for para in model.classifier1.parameters():
-        para.requires_grad = False
-    for para in model.classifier2.parameters():
-        para.requires_grad = False
-    for para in model.classifier3.parameters():
-        para.requires_grad = False
-
     for epoch in range(start_epoch + 1, args.aug_num_epochs + 1):
         start_time_e = time()
 
         write_log(logger, 'Augmenter training start...')
         model.train()
+
+        # for para in model.encoder.parameters():
+        #     para.requires_grad = False
+        # for para in model.latent_encoder.parameters():
+        #     para.requires_grad = False
+        # for para in model.latent_decoder.parameters():
+        #     para.requires_grad = False
+        # for para in model.classifier1.parameters():
+        #     para.requires_grad = False
+        # for para in model.classifier1.parameters():
+        #     para.requires_grad = False
+        # for para in model.classifier2.parameters():
+        #     para.requires_grad = False
+        # for para in model.classifier3.parameters():
+        #     para.requires_grad = False
 
         for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
@@ -319,10 +319,7 @@ def augmenter_training(args):
             cls_loss2 = cls_criterion(re_classifier_out, classifier_out.softmax(dim=1))
 
             # Loss Backward
-            if epoch <= 3:
-                total_loss = recon_loss + cls_loss2
-            else:
-                total_loss = cls_loss2
+            total_loss = recon_loss + (cls_loss2 * 100)
             total_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -372,7 +369,7 @@ def augmenter_training(args):
         val_recon_loss /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint234.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -396,20 +393,20 @@ def augmenter_training(args):
 
         eps_dict, prob_dict = dict(), dict()
 
-        for para in model.encoder.parameters():
-            para.requires_grad = True
-        for para in model.latent_encoder.parameters():
-            para.requires_grad = True
-        for para in model.latent_decoder.parameters():
-            para.requires_grad = True
-        for para in model.classifier1.parameters():
-            para.requires_grad = True
-        for para in model.classifier1.parameters():
-            para.requires_grad = True
-        for para in model.classifier2.parameters():
-            para.requires_grad = True
-        for para in model.classifier3.parameters():
-            para.requires_grad = True
+        # for para in model.encoder.parameters():
+        #     para.requires_grad = True
+        # for para in model.latent_encoder.parameters():
+        #     para.requires_grad = True
+        # for para in model.latent_decoder.parameters():
+        #     para.requires_grad = True
+        # for para in model.classifier1.parameters():
+        #     para.requires_grad = True
+        # for para in model.classifier1.parameters():
+        #     para.requires_grad = True
+        # for para in model.classifier2.parameters():
+        #     para.requires_grad = True
+        # for para in model.classifier3.parameters():
+        #     para.requires_grad = True
 
         for phase in ['train', 'valid']:
             example_iter = next(iter(dataloader_dict[phase]))
@@ -435,7 +432,7 @@ def augmenter_training(args):
 
                 # Classifier
                 classifier_out = model.classify(hidden_states=hidden_states)
-                src_output_prob = F.softmax(classifier_out)[0]
+                src_output_prob = F.softmax(classifier_out, dim=1)[0]
 
                 # Reconstruction
                 latent_out = None
@@ -453,15 +450,16 @@ def augmenter_training(args):
             with torch.no_grad():
                 encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device),
                                                  attention_mask=inp_dict['attention_mask'].to(device))
-                hidden_states = encoder_out_eps_0
+                hidden_states_pre = encoder_out_eps_0
+                if args.classify_method == 'latent_out':
+                    latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
+                    hidden_states_pre = latent_out_eps_0
 
-            if args.classify_method == 'latent_out':
-                latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
-                hidden_states = latent_out_eps_0
+                classifier_out = model.classify(hidden_states=hidden_states_pre)
+                prob_dict['eps_0'] = F.softmax(classifier_out, dim=1)[0]
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_0'] = F.softmax(classifier_out)[0]
 
             for _ in range(3):
 
@@ -474,15 +472,14 @@ def augmenter_training(args):
                 if args.classify_method == 'latent_out':
                     encoder_out_copy = encoder_out.clone().detach()
                     latent_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
-                    hidden_states_grad_true = latent_out_copy.clone()
+                    hidden_states_grad_true = latent_out_copy.clone().detach().requires_grad_(True)
                 else:
                     encoder_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
                     latent_out_copy = None
-                    hidden_states_grad_true = encoder_out_copy.clone()
+                    hidden_states_grad_true = encoder_out_copy.clone().detach().requires_grad_(True)
 
-                hidden_states_grad_true = hidden_states_grad_true.clone().detach().requires_grad_(True)
                 classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-                revised_prob = F.softmax(classifier_out)[0]
+                revised_prob = F.softmax(classifier_out, dim=1)[0]
 
             with torch.no_grad():
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
@@ -507,7 +504,7 @@ def augmenter_training(args):
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_1'] = F.softmax(classifier_out)[0]
+            prob_dict['eps_1'] = F.softmax(classifier_out, dim=1)[0]
 
             dict_key = prob_dict.keys()
 
