@@ -243,7 +243,7 @@ def augmenter_training(args):
         write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint234.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint1234.pth.tar')
         if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -267,20 +267,20 @@ def augmenter_training(args):
         write_log(logger, 'Augmenter training start...')
         model.train()
 
-        # for para in model.encoder.parameters():
-        #     para.requires_grad = False
-        # for para in model.latent_encoder.parameters():
-        #     para.requires_grad = False
-        # for para in model.latent_decoder.parameters():
-        #     para.requires_grad = False
-        # for para in model.classifier1.parameters():
-        #     para.requires_grad = False
-        # for para in model.classifier1.parameters():
-        #     para.requires_grad = False
-        # for para in model.classifier2.parameters():
-        #     para.requires_grad = False
-        # for para in model.classifier3.parameters():
-        #     para.requires_grad = False
+        for para in model.encoder.parameters():
+            para.requires_grad = False
+        for para in model.latent_encoder.parameters():
+            para.requires_grad = False
+        for para in model.latent_decoder.parameters():
+            para.requires_grad = False
+        for para in model.classifier1.parameters():
+            para.requires_grad = False
+        for para in model.classifier1.parameters():
+            para.requires_grad = False
+        for para in model.classifier2.parameters():
+            para.requires_grad = False
+        for para in model.classifier3.parameters():
+            para.requires_grad = False
 
         for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
@@ -369,7 +369,7 @@ def augmenter_training(args):
         val_recon_loss /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint234.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint1234.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -393,20 +393,20 @@ def augmenter_training(args):
 
         eps_dict, prob_dict = dict(), dict()
 
-        # for para in model.encoder.parameters():
-        #     para.requires_grad = True
-        # for para in model.latent_encoder.parameters():
-        #     para.requires_grad = True
-        # for para in model.latent_decoder.parameters():
-        #     para.requires_grad = True
-        # for para in model.classifier1.parameters():
-        #     para.requires_grad = True
-        # for para in model.classifier1.parameters():
-        #     para.requires_grad = True
-        # for para in model.classifier2.parameters():
-        #     para.requires_grad = True
-        # for para in model.classifier3.parameters():
-        #     para.requires_grad = True
+        for para in model.encoder.parameters():
+            para.requires_grad = True
+        for para in model.latent_encoder.parameters():
+            para.requires_grad = True
+        for para in model.latent_decoder.parameters():
+            para.requires_grad = True
+        for para in model.classifier1.parameters():
+            para.requires_grad = True
+        for para in model.classifier1.parameters():
+            para.requires_grad = True
+        for para in model.classifier2.parameters():
+            para.requires_grad = True
+        for para in model.classifier3.parameters():
+            para.requires_grad = True
 
         for phase in ['train', 'valid']:
             example_iter = next(iter(dataloader_dict[phase]))
