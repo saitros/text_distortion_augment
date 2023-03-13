@@ -138,17 +138,17 @@ def training(args):
 
     # 3) Model resume
     start_epoch = 0
-    if args.resume:
-        write_log(logger, 'Resume model...')
-        save_path = os.path.join(args.model_save_path, args.data_name)
-        save_file_name = os.path.join(save_path,
-                                        f'checkpoint_src_{args.src_vocab_size}_trg_{args.trg_vocab_size}_v_{args.variational_mode}_p_{args.parallel}.pth.tar')
-        checkpoint = torch.load(save_file_name)
-        start_epoch = checkpoint['epoch'] - 1
-        model.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        scheduler.load_state_dict(checkpoint['scheduler'])
-        del checkpoint
+    # if args.resume:
+    #     write_log(logger, 'Resume model...')
+    #     save_path = os.path.join(args.model_save_path, args.data_name)
+    #     save_file_name = os.path.join(save_path,
+    #                                     f'checkpoint_src_{args.src_vocab_size}_trg_{args.trg_vocab_size}_v_{args.variational_mode}_p_{args.parallel}.pth.tar')
+    #     checkpoint = torch.load(save_file_name)
+    #     start_epoch = checkpoint['epoch'] - 1
+    #     model.load_state_dict(checkpoint['model'])
+    #     optimizer.load_state_dict(checkpoint['optimizer'])
+    #     scheduler.load_state_dict(checkpoint['scheduler'])
+    #     del checkpoint
 
     #===================================#
     #=========Model Train Start=========#
