@@ -267,20 +267,7 @@ def augmenter_training(args):
         write_log(logger, 'Augmenter training start...')
         model.train()
 
-        for para in model.encoder.parameters():
-            para.requires_grad = False
-        for para in model.latent_encoder.parameters():
-            para.requires_grad = False
-        for para in model.latent_decoder.parameters():
-            para.requires_grad = False
-        for para in model.classifier1.parameters():
-            para.requires_grad = False
-        for para in model.classifier1.parameters():
-            para.requires_grad = False
-        for para in model.classifier2.parameters():
-            para.requires_grad = False
-        for para in model.classifier3.parameters():
-            para.requires_grad = False
+        model = encoder_parameter_grad(model, on=False)
 
         for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
@@ -393,20 +380,7 @@ def augmenter_training(args):
 
         eps_dict, prob_dict = dict(), dict()
 
-        for para in model.encoder.parameters():
-            para.requires_grad = True
-        for para in model.latent_encoder.parameters():
-            para.requires_grad = True
-        for para in model.latent_decoder.parameters():
-            para.requires_grad = True
-        for para in model.classifier1.parameters():
-            para.requires_grad = True
-        for para in model.classifier1.parameters():
-            para.requires_grad = True
-        for para in model.classifier2.parameters():
-            para.requires_grad = True
-        for para in model.classifier3.parameters():
-            para.requires_grad = True
+        model = encoder_parameter_grad(model, on=True)
 
         for phase in ['train', 'valid']:
             example_iter = next(iter(dataloader_dict[phase]))
