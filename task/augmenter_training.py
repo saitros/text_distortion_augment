@@ -17,7 +17,7 @@ import torch.backends.cudnn as cudnn
 from torch.nn import functional as F
 from torch.nn.utils import clip_grad_norm_
 from torch.cuda.amp import GradScaler, autocast
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, RandomSampler
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 # Import custom modules
