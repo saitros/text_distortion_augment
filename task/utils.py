@@ -183,18 +183,18 @@ def input_to_device(batch_iter, device):
 
 def encoder_parameter_grad(model, on: bool = True):
     for para in model.encoder.parameters():
-        para.requires_grad = True
+        para.requires_grad = on
     for para in model.latent_encoder.parameters():
-        para.requires_grad = True
+        para.requires_grad = on
     for para in model.latent_decoder.parameters():
-        para.requires_grad = True
+        para.requires_grad = on
     for para in model.classifier1.parameters():
-        para.requires_grad = True
+        para.requires_grad = on
     for para in model.classifier1.parameters():
-        para.requires_grad = True
+        para.requires_grad = on
     for para in model.classifier2.parameters():
-        para.requires_grad = True
+        para.requires_grad = on
     for para in model.classifier3.parameters():
-        para.requires_grad = True
+        para.requires_grad = on
 
     return model

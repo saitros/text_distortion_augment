@@ -27,7 +27,7 @@ from model.loss import compute_mmd, CustomLoss
 from optimizer.utils import shceduler_select, optimizer_select
 from optimizer.scheduler import get_cosine_schedule_with_warmup
 from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
-from task.utils import input_to_device
+from task.utils import input_to_device, encoder_parameter_grad
 
 def augmenter_training(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -111,7 +111,7 @@ def augmenter_training(args):
                             batch_size=args.batch_size, shuffle=True, pin_memory=True,
                             num_workers=args.num_workers)
     }
-    write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
+    write_log(logger, f"Total number of trainingsets iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
 
     del (
         train_src_input_ids, train_src_attention_mask, train_src_token_type_ids, train_trg_list,
@@ -243,7 +243,7 @@ def augmenter_training(args):
         write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint1234.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
         if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -356,7 +356,7 @@ def augmenter_training(args):
         val_recon_loss /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint1234.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
