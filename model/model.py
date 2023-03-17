@@ -11,10 +11,10 @@ from torch.nn import functional as F
 from transformers import PretrainedConfig, AutoModel, AutoTokenizer
 # Import Custom Modules
 from utils import return_model_name
-from model.utils import model_setting
+from model.utils import encoder_model_setting, decoder_model_setting
 
 class TransformerModel(nn.Module):
-    def __init__(self, model_type: str = 'bart', isPreTrain: bool = True,
+    def __init__(self, encoder_model_type: str = 'bart', decoder_model_type: str = 'bart', isPreTrain: bool = True,
                  encoder_out_mix_ratio: float = 0.5, encoder_out_cross_attention: bool = True,
                  encoder_out_to_augmenter: bool = True, classify_method: str = 'latent_out',
                  src_max_len: int = 150, num_labels: int = 2,
@@ -46,16 +46,22 @@ class TransformerModel(nn.Module):
         self.encoder_out_mix_ratio = encoder_out_mix_ratio
         self.latent_out_mix_ratio = 1.0 - encoder_out_mix_ratio
 
-        # Model setting
-        self.model_type = model_type
-        model_name = return_model_name(self.model_type)
-        encoder, decoder, model_config = model_setting(model_name, self.isPreTrain)
+        # Encoder model setting
+        self.encoder_model_type = encoder_model_type
+        encoder_model_name = return_model_name(self.encoder_model_type)
+        encoder, encoder_model_config = encoder_model_setting(encoder_model_name, self.isPreTrain)
 
-        self.model_config = model_config
-        self.d_hidden = model_config.d_model
+        # Encoder model setting
+        self.decoder_model_type = decoder_model_type
+        decoder_model_name = return_model_name(self.decoder_model_type)
+        decoder, decoder_model_config = decoder_model_setting(decoder_model_name, self.isPreTrain)
+
+        self.encoder_model_config = encoder_model_config
+        self.decoder_model_config = decoder_model_config
+        self.d_hidden = encoder_model_config.d_model
         self.d_embedding = int(self.d_hidden / 2)
         self.num_labels = num_labels
-        self.vocab_num = model_config.vocab_size
+        self.vocab_num = decoder_model_config.vocab_size
 
         # Encoder setting
         self.encoder = encoder
@@ -77,19 +83,23 @@ class TransformerModel(nn.Module):
         self.decoder_augmenter = nn.Linear(self.d_embedding, self.vocab_num)
 
         # Tokenizer Setting
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(decoder_model_name)
         self.pad_idx = self.tokenizer.pad_token_id
-        self.decoder_start_token_id = self.model_config.decoder_start_token_id
-        if self.model_type == 'bert':
+        self.decoder_start_token_id = self.decoder_model_config.decoder_start_token_id
+        if self.decoder_model_type == 'bert':
             self.bos_idx = self.tokenizer.cls_token_id
             self.eos_idx = self.tokenizer.sep_token_id
         else:
             self.bos_idx = self.tokenizer.bos_token_id
             self.eos_idx = self.tokenizer.eos_token_id
 
-    def encode(self, input_ids, attention_mask):
-        encoder_out = self.encoder(input_ids=input_ids,
-                                   attention_mask=attention_mask)
+    def encode(self, input_ids, attention_mask=None):
+        if input_ids.dtype == torch.int64:
+            encoder_out = self.encoder(input_ids=input_ids,
+                                    attention_mask=attention_mask)
+        else:
+            encoder_out = self.encoder(inputs_embeds=input_ids,
+                                    attention_mask=attention_mask)
         encoder_out = encoder_out['last_hidden_state'] # (batch_size, seq_len, d_hidden)
 
         return encoder_out
@@ -122,6 +132,7 @@ class TransformerModel(nn.Module):
                 encoder_hidden_states = encoder_out
             elif self.encoder_out_mix_ratio == 0:
                 encoder_hidden_states = latent_out
+                attention_mask = None
             else:
                 encoder_hidden_states = torch.add((self.encoder_out_mix_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
         else:
@@ -302,9 +313,11 @@ class TransformerModel(nn.Module):
             # Next word probability
             scores = F.gelu(self.decoder_linear(decoder_outputs[:,-1])) # (batch_size, d_embedding)
             scores = self.decoder_augmenter(self.decoder_norm(scores)) # (batch_size, vocab_num)
+            
             # Avoid generating <pad> and <s> token and apply softmax temperature
-            scores[:, self.pad_idx] = float('-inf')
-            scores[:, self.bos_idx] = float('-inf')
+            if step == 0:
+                scores[:, self.pad_idx] = float('-inf')
+                scores[:, self.bos_idx] = float('-inf')
             scores = scores / softmax_temp
             next_word_prob = F.softmax(scores, dim=1) # (batch_size, vocab_num)
 
@@ -335,8 +348,6 @@ class TransformerModel(nn.Module):
             next_word = next_word.unsqueeze(1) # (batch_size, 1)
             seqs = torch.cat([seqs, next_word], dim=1) # (batch_size, seq_len + 1)
 
-        print(seqs)
-        return seqs
         # Postprocessing - remove generated tokens after <eos> token
         seqs = seqs.tolist()
         for i in range(batch_size):

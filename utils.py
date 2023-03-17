@@ -30,8 +30,8 @@ def path_check(args):
     if not os.path.exists(os.path.join(args.preprocess_path, args.data_name)):
         os.makedirs(os.path.join(args.preprocess_path, args.data_name))
 
-    if not os.path.exists(os.path.join(args.preprocess_path, args.data_name, args.model_type)):
-        os.makedirs(os.path.join(args.preprocess_path, args.data_name, args.model_type))
+    if not os.path.exists(os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)):
+        os.makedirs(os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type))
 
     # Model Checkpoint Path Checking
     if not os.path.exists(args.model_save_path):
@@ -40,8 +40,8 @@ def path_check(args):
     if not os.path.exists(os.path.join(args.model_save_path, args.data_name)):
         os.makedirs(os.path.join(args.model_save_path, args.data_name))
 
-    if not os.path.exists(os.path.join(args.model_save_path, args.data_name, args.model_type)):
-        os.makedirs(os.path.join(args.model_save_path, args.data_name, args.model_type))
+    if not os.path.exists(os.path.join(args.model_save_path, args.data_name, args.encoder_model_type)):
+        os.makedirs(os.path.join(args.model_save_path, args.data_name, args.encoder_model_type))
 
     # Testing Results Path Checking
     if not os.path.exists(args.result_path):

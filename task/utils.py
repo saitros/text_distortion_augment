@@ -137,7 +137,6 @@ def tokenizing(args, src_list, tokenizer):
     processed_sequences['valid'] = dict()
     processed_sequences['test'] = dict()
 
-
     if args.data_name in ['mnli', 'mrpc']:
         for phase in ['train', 'valid', 'test']:
             encoded_dict = \
@@ -166,7 +165,6 @@ def tokenizing(args, src_list, tokenizer):
             if args.model_type == 'bert':
                 processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
 
-
     return processed_sequences
 
 def input_to_device(batch_iter, device):
@@ -182,3 +180,21 @@ def input_to_device(batch_iter, device):
     trg_label = trg_label.to(device, non_blocking=True)
 
     return src_sequence, src_att, src_seg, trg_label
+
+def encoder_parameter_grad(model, on: bool = True):
+    for para in model.encoder.parameters():
+        para.requires_grad = on
+    for para in model.latent_encoder.parameters():
+        para.requires_grad = on
+    for para in model.latent_decoder.parameters():
+        para.requires_grad = on
+    for para in model.classifier1.parameters():
+        para.requires_grad = on
+    for para in model.classifier1.parameters():
+        para.requires_grad = on
+    for para in model.classifier2.parameters():
+        para.requires_grad = on
+    for para in model.classifier3.parameters():
+        para.requires_grad = on
+
+    return model

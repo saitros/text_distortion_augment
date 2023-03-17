@@ -27,7 +27,7 @@ from model.loss import compute_mmd, CustomLoss
 from optimizer.utils import shceduler_select, optimizer_select
 from optimizer.scheduler import get_cosine_schedule_with_warmup
 from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
-from task.utils import input_to_device
+from task.utils import input_to_device, encoder_parameter_grad
 
 def augmenter_training(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -53,7 +53,7 @@ def augmenter_training(args):
     write_log(logger, "Load data...")
     gc.disable()
 
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
 
     with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed.hdf5'), 'r') as f:
         train_src_input_ids = f.get('train_src_input_ids')[:]
@@ -64,7 +64,7 @@ def augmenter_training(args):
         train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
         valid_trg_list = f.get('valid_label')[:]
         valid_trg_list = F.one_hot(torch.tensor(valid_trg_list, dtype=torch.long)).numpy()
-        if args.model_type == 'bert':
+        if args.encoder_model_type == 'bert':
             train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
             valid_src_token_type_ids = f.get('valid_src_token_type_ids')[:]
         else:
@@ -87,7 +87,8 @@ def augmenter_training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(model_type=args.model_type, isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
+    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type, 
+                             isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
                              encoder_out_cross_attention=args.encoder_out_cross_attention,
                              encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
                              src_max_len=args.src_max_len, num_labels=num_labels, dropout=args.dropout)
@@ -110,7 +111,7 @@ def augmenter_training(args):
                             batch_size=args.batch_size, shuffle=True, pin_memory=True,
                             num_workers=args.num_workers)
     }
-    write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
+    write_log(logger, f"Total number of trainingsets iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
 
     del (
         train_src_input_ids, train_src_attention_mask, train_src_token_type_ids, train_trg_list,
@@ -132,7 +133,7 @@ def augmenter_training(args):
     cls_training_done = False
     if args.resume:
         write_log(logger, 'Resume model...')
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
         checkpoint = torch.load(save_file_name)
         cls_training_done = checkpoint['cls_training_done']
         start_epoch = checkpoint['epoch'] - 1
@@ -242,7 +243,7 @@ def augmenter_training(args):
         write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
         if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -266,6 +267,8 @@ def augmenter_training(args):
         write_log(logger, 'Augmenter training start...')
         model.train()
 
+        model = encoder_parameter_grad(model, on=False)
+
         for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
             aug_optimizer.zero_grad(set_to_none=True)
@@ -278,15 +281,33 @@ def augmenter_training(args):
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
                 latent_out = None
+                hidden_states = encoder_out
                 if args.encoder_out_mix_ratio != 0:
                     latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                    hidden_states = latent_out
+
+            # Classifier Results
+            with torch.no_grad():
+                classifier_out = model.classify(hidden_states=hidden_states)
 
             # Reconstruction
             recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
+            # Additional Loss
+            encoder_out = model.encode(input_ids=recon_out.argmax(dim=2))
+            latent_out = None
+            hidden_states = encoder_out
+            if args.encoder_out_mix_ratio != 0:
+                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                hidden_states = latent_out
+
+            re_classifier_out = model.classify(hidden_states=hidden_states)
+            cls_loss2 = cls_criterion(re_classifier_out, classifier_out.softmax(dim=1))
+
             # Loss Backward
-            recon_loss.backward()
+            total_loss = recon_loss + (cls_loss2 * 100)
+            total_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(model.parameters(), args.clip_grad_norm)
             aug_optimizer.step()
@@ -295,8 +316,8 @@ def augmenter_training(args):
             # Print loss value only training
             if i == 0 or i % args.print_freq == 0 or i == len(dataloader_dict['train'])-1:
                 # train_acc = (recon_out.view(-1, src_vocab_num).argmax(dim=1) == src_sequence.contiguous().view(-1)).sum() / len(src_sequence)
-                iter_log = "[Epoch:%03d][%03d/%03d] train_recon_loss:%03.2f | learning_rate:%1.6f |spend_time:%02.2fmin" % \
-                    (epoch, i, len(dataloader_dict['train'])-1, recon_loss.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                iter_log = "[Epoch:%03d][%03d/%03d] train_recon_loss:%03.2f | train_cls2_loss:%03.2f | learning_rate:%1.6f |spend_time:%02.2fmin" % \
+                    (epoch, i, len(dataloader_dict['train'])-1, recon_loss.item(), cls_loss2.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                 write_log(logger, iter_log)
 
             if args.debuging_mode:
@@ -335,7 +356,7 @@ def augmenter_training(args):
         val_recon_loss /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, 'checkpoint.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -359,6 +380,8 @@ def augmenter_training(args):
 
         eps_dict, prob_dict = dict(), dict()
 
+        model = encoder_parameter_grad(model, on=True)
+
         for phase in ['train', 'valid']:
             example_iter = next(iter(dataloader_dict[phase]))
 
@@ -368,9 +391,12 @@ def augmenter_training(args):
             src_output = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
 
             # Target Label Setting
-            fliped_trg_label = torch.flip(trg_label, dims=[1]).to(device)
+            if args.label_flipping:
+                fliped_trg_label = torch.flip(trg_label, dims=[1]).to(device)
+            else:
+                fliped_trg_label = torch.ones_like(trg_label) * 0.5
 
-            # Original Reconstruction
+            # Forward
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
                 hidden_states = encoder_out
@@ -380,14 +406,15 @@ def augmenter_training(args):
 
                 # Classifier
                 classifier_out = model.classify(hidden_states=hidden_states)
-                src_output_prob = F.softmax(classifier_out)[0]
+                src_output_prob = F.softmax(classifier_out, dim=1)[0]
 
+                # Reconstruction
                 latent_out = None
                 if args.encoder_out_mix_ratio != 0:
                     latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
-            # Reconstruction Output Tokenizing & Pre-processing
+            # Output Tokenizing & Pre-processing
             detokenized = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
             eps_dict['eps_0'] = detokenized[0]
             inp_dict = model.tokenizer(detokenized, max_length=args.src_max_len,
@@ -397,29 +424,36 @@ def augmenter_training(args):
             with torch.no_grad():
                 encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device),
                                                  attention_mask=inp_dict['attention_mask'].to(device))
-                hidden_states = encoder_out_eps_0
+                hidden_states_pre = encoder_out_eps_0
+                if args.classify_method == 'latent_out':
+                    latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
+                    hidden_states_pre = latent_out_eps_0
 
-            if args.classify_method == 'latent_out':
-                latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
-                hidden_states = latent_out_eps_0
+                classifier_out = model.classify(hidden_states=hidden_states_pre)
+                prob_dict['eps_0'] = F.softmax(classifier_out, dim=1)[0]
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_0'] = F.softmax(classifier_out)[0]
 
-            model.zero_grad()
-            cls_loss = cls_criterion(classifier_out, fliped_trg_label)
-            cls_loss.backward()
-            hidden_states_grad = hidden_states_grad_true.grad.data
-            hidden_states_grad = hidden_states_grad.sign()
+            for _ in range(3):
 
-            # FGSM
-            if args.classify_method == 'latent_out':
-                encoder_out_copy = encoder_out.clone().detach()
-                latent_out_copy = hidden_states_grad_true - (args.fgsm_epsilon * hidden_states_grad)
-            else:
-                encoder_out_copy = hidden_states_grad_true - (args.fgsm_epsilon * hidden_states_grad)
-                latent_out_copy = None
+                model.zero_grad()
+                cls_loss = cls_criterion(classifier_out, fliped_trg_label)
+                cls_loss.backward()
+                hidden_states_grad = hidden_states_grad_true.grad.data.sign()
+                
+                # Gradient-based Modification
+                if args.classify_method == 'latent_out':
+                    encoder_out_copy = encoder_out.clone().detach()
+                    latent_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                    hidden_states_grad_true = latent_out_copy.clone().detach().requires_grad_(True)
+                else:
+                    encoder_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                    latent_out_copy = None
+                    hidden_states_grad_true = encoder_out_copy.clone().detach().requires_grad_(True)
+
+                classifier_out = model.classify(hidden_states=hidden_states_grad_true)
+                revised_prob = F.softmax(classifier_out, dim=1)[0]
 
             with torch.no_grad():
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
@@ -444,15 +478,19 @@ def augmenter_training(args):
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
             classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_1'] = F.softmax(classifier_out)[0]
+            prob_dict['eps_1'] = F.softmax(classifier_out, dim=1)[0]
 
             dict_key = prob_dict.keys()
 
             write_log(logger, f'Generated Examples')
+            write_log(logger, f'Epsilon repeat: 3')
             write_log(logger, f'Phase: {phase}')
             write_log(logger, f'Source: {src_output}')
-            write_log(logger, f'Augmented_origin: {eps_dict["eps_0"]}')
-            write_log(logger, f'Augmented_origin Probability: {prob_dict["eps_0"]}')
+            write_log(logger, f'Source Probability: {src_output_prob}')
+            write_log(logger, f'Reconstructed: {eps_dict["eps_0"]}')
+            write_log(logger, f'Reconstructed Probability: {prob_dict["eps_0"]}')
+            write_log(logger, '-'*50)
+            write_log(logger, f'Revised Probability: {revised_prob}')
             write_log(logger, f'Augmented: {eps_dict["eps_1"]}')
             write_log(logger, f'Augmented Probability: {prob_dict["eps_1"]}')
 
@@ -461,3 +499,7 @@ def augmenter_training(args):
     write_log(logger, f'Best AUG Loss: {round(best_aug_val_loss.item(), 2)}')
     write_log(logger, f'Best CLS Epoch: {best_cls_epoch}')
     write_log(logger, f'Best CLS Loss: {round(best_cls_val_loss.item(), 2)}')
+
+# 1. 단순 reconstruction때는 [0,1]로 문장 나오면 되고
+# 2. augment 한거는 옮겨진 만큼으로 나오면 되고
+# 1 학습 하고 2 학습 하고

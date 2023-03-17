@@ -56,9 +56,11 @@ if __name__=='__main__':
     # Model setting
     parser.add_argument('--isPreTrain', default=True, type=str2bool,
                         help='Use pre-trained language model; Default is True')
-    parser.add_argument('--model_type', default='bart', type=str,
+    parser.add_argument('--encoder_model_type', default='bart', type=str,
+                        help='Classification model type; Default is BART')
+    parser.add_argument('--decoder_model_type', default='bart', type=str,
                         help='Augmentation model type; Default is BART')
-    parser.add_argument('--classify_method', default='latent_out', type=str, choices=['encoder_out', 'latnet_out'],
+    parser.add_argument('--classify_method', default='latent_out', type=str, choices=['encoder_out', 'latent_out'],
                         help='')
     parser.add_argument('--encoder_out_mix_ratio', default=0.3, type=float,
                         help='Encoder output ratio to input of decoder; Default is 0.3')
@@ -69,6 +71,8 @@ if __name__=='__main__':
     parser.add_argument('--latent_out_to_augmenter', default=True, type=str2bool,
                         help='Add decoder output and latent output to augmenter; Default is True')
     parser.add_argument('--latent_mmd_loss', default=False, type=str2bool,
+                        help='')
+    parser.add_argument('--label_flipping', default=False, type=str2bool,
                         help='')
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
@@ -118,7 +122,7 @@ if __name__=='__main__':
     parser.add_argument('--z_variation', default=2, type=float,
                         help='')
     # Testing setting
-    parser.add_argument('--fgsm_epsilon', default=0.8, type=float,
+    parser.add_argument('--grad_epsilon', default=0.001, type=float,
                         help='')
     parser.add_argument('--test_batch_size', default=32, type=int,
                         help='Test batch size; Default is 32')

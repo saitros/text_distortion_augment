@@ -48,14 +48,14 @@ def augmenting(args):
     write_log(logger, "Load data...")
     gc.disable()
 
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
 
     with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'r') as f:
         train_src_input_ids = f.get('train_src_input_ids')[:]
         train_src_attention_mask = f.get('train_src_attention_mask')[:]
         train_trg_list = f.get('train_label')[:]
         train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
-        if args.model_type == 'bert':
+        if args.encoder_model_type == 'bert':
             train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
         else:
             train_src_token_type_ids = list()
@@ -76,8 +76,11 @@ def augmenting(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(model_type=args.model_type, src_max_len=args.src_max_len,
-                                 isPreTrain=args.isPreTrain, num_labels=num_labels, dropout=args.dropout)
+    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type, 
+                             isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
+                             encoder_out_cross_attention=args.encoder_out_cross_attention,
+                             encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
+                             src_max_len=args.src_max_len, num_labels=num_labels, dropout=args.dropout)
     model.to(device)
 
     # 2) Dataloader setting
@@ -87,16 +90,16 @@ def augmenting(args):
                                trg_list=train_trg_list, src_max_len=args.src_max_len)
     }
     dataloader_dict = {
-        'train': DataLoader(dataset_dict['train'][:50], drop_last=False,
-                            batch_size=args.batch_size, shuffle=False, pin_memory=True,
-                            num_workers=args.num_workers)
+        'train': DataLoader(dataset_dict['train'], drop_last=True,
+                            batch_size=args.batch_size, shuffle=True,
+                            pin_memory=True, num_workers=args.num_workers)
     }
-    write_log(logger, f"Total number of trainingsets iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
+    write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
 
     # 3) Model loading
     cudnn.benchmark = True
     cls_criterion = nn.CrossEntropyLoss().to(device)
-    save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, f'checkpoint.pth.tar')
+    save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
     checkpoint = torch.load(save_file_name)
     model.load_state_dict(checkpoint['model'])
     write_log(logger, f'Loaded augmenter model from {save_file_name}')
@@ -110,43 +113,51 @@ def augmenting(args):
     model.eval()
 
     aug_sent_dict = {
-        'origin': [],
-        'recon': [],
-        'fgsm': []
+        'origin': list(),
+        'recon': list(),
+        'fgsm': list()
     }
     aug_prob_dict = {
-        'origin': [],
-        'recon': [],
-        'fgsm': []
+        'origin': list(),
+        'recon': list(),
+        'fgsm': list()
     }
 
     for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
         # Input setting
         b_iter = input_to_device(batch_iter, device=device)
         src_sequence, src_att, src_seg, trg_label = b_iter
-        trg_fliped_label = torch.flip(trg_label, dims=[1])
+
+        # Target Label Setting
+        if args.label_flipping:
+            fliped_trg_label = torch.flip(trg_label, dims=[1]).to(device)
+        else:
+            fliped_trg_label = torch.ones_like(trg_label) * 0.5
 
         # Source De-tokenizing for original sentence
         origin_source = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)
-        print(origin_source)
         aug_sent_dict['origin'].extend(origin_source)
         aug_prob_dict['origin'].extend(trg_label.to('cpu').numpy().tolist())
 
-        # Recon - generate sentence
+        # Generate sentence
         with torch.no_grad():
+
+            # Encoding
             encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-            if args.encoder_out_mix_ratio != 0:
+            latent_out = None
+            if args.encoder_out_mix_ratio == 0:
                 latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
 
-            if args.test_decoding_strategy == 'beam':
+            if args.test_decoding_strategy == 'greedy':
+                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
+            elif args.test_decoding_strategy == 'beam':
                 recon_out = model.generate(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att, beam_size=args.beam_size,
                                            beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
-            elif args.test_decoding_strategy in ['greedy', 'multinomial', 'topk', 'topp']:
+            elif args.test_decoding_strategy in ['multinomial', 'topk', 'topp']:
                 recon_out = model.generate_sample(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att,
                                                   sampling_strategy=args.test_decoding_strategy, device=device,
                                                   topk=args.topk, topp=args.topp, softmax_temp=args.multinomial_temperature)
             decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
-            print(decoded_output)
 
             # Get classification probability for decoded_output
             classifier_out = model.classify(hidden_states=encoder_out)
@@ -202,7 +213,13 @@ def augmenting(args):
         processed_aug_seq[phase]['attention_mask'] = encoded_dict['attention_mask']
         if args.model_type == 'bert':
             processed_aug_seq[phase]['token_type_ids'] = encoded_dict['token_type_ids']
-        processed_aug_seq[phase]['label'] = aug_prob_dict[phase]
+
+        if args.augmenting_label == 'soft':
+            processed_aug_seq[phase]['label'] = aug_prob_dict[phase]
+        elif args.augmenting_label == 'hard':
+            processed_aug_seq[phase]['label'] = torch.argmax(aug_prob_dict[phase], dim=1) # Need Check
+        else:
+            raise ValueError
 
     # Save with h5py
     save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
