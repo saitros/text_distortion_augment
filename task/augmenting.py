@@ -145,7 +145,7 @@ def augmenting(args):
             # Encoding
             encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
             latent_out = None
-            if args.encoder_out_mix_ratio == 0:
+            if args.encoder_out_mix_ratio != 0:
                 latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
 
             if args.test_decoding_strategy == 'greedy':

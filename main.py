@@ -140,6 +140,8 @@ if __name__=='__main__':
                         help='Topk sampling size; Default is 0.9')
     parser.add_argument('--multinomial_temperature', default=3.0, type=float,
                         help='Multinomial sampling temperature; Default is 3.0')
+    parser.add_argument('--augmenting_label', default='hard', type=str,
+                        help='')
     # Seed & Logging setting
     parser.add_argument('--seed', default=42, type=int,
                         help='Random seed; Default is 42')

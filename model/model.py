@@ -174,9 +174,12 @@ class TransformerModel(nn.Module):
 
         # Expanding
         if self.encoder_out_cross_attention:
-            src_key_padding_mask = attention_mask.view(batch_size, 1, -1)
-            src_key_padding_mask = src_key_padding_mask.repeat(1, beam_size, 1)
-            src_key_padding_mask = src_key_padding_mask.view(-1, src_seq_size)
+            if self.latent_out_mix_ratio == 0:
+                src_key_padding_mask = attention_mask.view(batch_size, 1, -1)
+                src_key_padding_mask = src_key_padding_mask.repeat(1, beam_size, 1)
+                src_key_padding_mask = src_key_padding_mask.view(-1, src_seq_size)
+            else:
+                src_key_padding_mask = None
 
             encoder_hidden_states = encoder_hidden_states.view(-1, batch_size, 1, self.d_hidden)
             encoder_hidden_states = encoder_hidden_states.repeat(1, 1, beam_size, 1)
