@@ -144,6 +144,12 @@ def augmenting(args):
 
             # Encoding
             encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+            hidden_states = encoder_out
+            if args.classify_method == 'latent_out':
+                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                hidden_states = latent_out
+
+            # Reconstruction
             latent_out = None
             if args.encoder_out_mix_ratio != 0:
                 latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
@@ -159,31 +165,39 @@ def augmenting(args):
                                                   topk=args.topk, topp=args.topp, softmax_temp=args.multinomial_temperature)
             decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
 
-            # Get classification probability for decoded_output
-            classifier_out = model.classify(hidden_states=encoder_out)
+        # Get classification probability for decoded_output
+        classifier_out = model.classify(hidden_states=hidden_states)
+
         aug_sent_dict['recon'].extend(decoded_output)
-        aug_prob_dict['recon'].extend(F.softmax(classifier_out, dim=1).to('cpu').numpy().tolist())
+        aug_prob_dict['recon'].extend(F.softmax(classifier_out, dim=1).detach().cpu().numpy())
 
         # FGSM - take gradient of classifier output w.r.t. encoder output
-        encoder_out_copy = encoder_out.clone().detach().requires_grad_(True)
-        classifier_out = model.classify(hidden_states=encoder_out_copy)
+        hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
+        classifier_out = model.classify(hidden_states=hidden_states_grad_true)
 
-        cls_loss = cls_criterion(classifier_out, trg_fliped_label)
-        model.zero_grad()
-        cls_loss.backward()
-        encoder_out_copy_grad = encoder_out_copy.grad.data
-        encoder_out_copy = encoder_out_copy + (args.fgsm_epsilon * encoder_out_copy_grad)
+        for _ in range(3):
+
+            model.zero_grad()
+            cls_loss = cls_criterion(classifier_out, fliped_trg_label)
+            cls_loss.backward()
+            hidden_states_grad = hidden_states_grad_true.grad.data.sign()
+            
+            # Gradient-based Modification
+            if args.classify_method == 'latent_out':
+                encoder_out_copy = encoder_out.clone().detach()
+                latent_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                hidden_states_grad_true = latent_out_copy.clone().detach().requires_grad_(True)
+            else:
+                encoder_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                latent_out_copy = None
+                hidden_states_grad_true = encoder_out_copy.clone().detach().requires_grad_(True)
+
+            classifier_out = model.classify(hidden_states=hidden_states_grad_true)
 
         # FGSM - generate sentence
         with torch.no_grad():
-            if args.encoder_out_mix_ratio != 0:
-                latent_out_copy, latent_encoder_out_copy = model.latent_encode(encoder_out=encoder_out)
-            else:
-                latent_out_copy = None
-                latent_encoder_out_copy = None
-
             if args.test_decoding_strategy == 'beam':
-                recon_out = model.generate(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att, beam_size=args.beam_size,
+                recon_out = model.generate(encoder_out=encoder_out_copy, latent_out=latent_out_copy, attention_mask=src_att, beam_size=args.beam_size,
                                            beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
             elif args.test_decoding_strategy in ['greedy', 'multinomial', 'topk', 'topp']:
                 recon_out = model.generate_sample(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att,
@@ -195,6 +209,9 @@ def augmenting(args):
             classifier_out_fgsm = model.classify(hidden_states=encoder_out_copy)
         aug_sent_dict['fgsm'].extend(decoded_output)
         aug_prob_dict['fgsm'].extend(F.softmax(classifier_out_fgsm, dim=1).to('cpu').numpy().tolist())
+
+        if args.debuging_mode:
+            break
 
     # POST-PROCESSING
     processed_aug_seq = {}
@@ -211,18 +228,18 @@ def augmenting(args):
         )
         processed_aug_seq[phase]['input_ids'] = encoded_dict['input_ids']
         processed_aug_seq[phase]['attention_mask'] = encoded_dict['attention_mask']
-        if args.model_type == 'bert':
+        if args.encoder_model_type == 'bert':
             processed_aug_seq[phase]['token_type_ids'] = encoded_dict['token_type_ids']
 
         if args.augmenting_label == 'soft':
             processed_aug_seq[phase]['label'] = aug_prob_dict[phase]
         elif args.augmenting_label == 'hard':
-            processed_aug_seq[phase]['label'] = torch.argmax(aug_prob_dict[phase], dim=1) # Need Check
+            processed_aug_seq[phase]['label'] = np.argmax(np.array(aug_prob_dict[phase]), axis=1) # Need Check
         else:
             raise ValueError
 
     # Save with h5py
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
 
     with h5py.File(os.path.join(save_path, 'processed_aug.hdf5'), 'w') as f:
         # origin data
@@ -237,7 +254,7 @@ def augmenting(args):
         f.create_dataset('train_fgsm_src_input_ids', data=processed_aug_seq['fgsm']['input_ids'])
         f.create_dataset('train_fgsm_src_attention_mask', data=processed_aug_seq['fgsm']['attention_mask'])
         f.create_dataset('train_fgsm_label', data=processed_aug_seq['fgsm']['label'])
-        if args.model_type == 'bert':
+        if args.encoder_model_type == 'bert':
             f.create_dataset('train_src_token_type_ids', data=processed_aug_seq['origin']['token_type_ids'])
             f.create_dataset('train_recon_src_token_type_ids', data=processed_aug_seq['recon']['token_type_ids'])
             f.create_dataset('train_fgsm_src_token_type_ids', data=processed_aug_seq['fgsm']['token_type_ids'])
