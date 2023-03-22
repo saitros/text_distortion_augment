@@ -44,7 +44,7 @@ def preprocessing(args):
     write_log(logger, 'Tokenizer setting...')
     start_time = time.time()
 
-    model_name = return_model_name(args.model_type)
+    model_name = return_model_name(args.encoder_model_type)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     processed_sequences = tokenizing(args, src_list, tokenizer)
@@ -59,7 +59,7 @@ def preprocessing(args):
     start_time = time.time()
 
     # Path checking
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
 
     with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed.hdf5'), 'w') as f:
         f.create_dataset('train_src_input_ids', data=processed_sequences['train']['input_ids'])
@@ -68,7 +68,7 @@ def preprocessing(args):
         f.create_dataset('valid_src_attention_mask', data=processed_sequences['valid']['attention_mask'])
         f.create_dataset('train_label', data=np.array(trg_list['train']).astype(int))
         f.create_dataset('valid_label', data=np.array(trg_list['valid']).astype(int))
-        if args.model_type == 'bert':
+        if args.encoder_model_type == 'bert':
             f.create_dataset('train_src_token_type_ids', data=processed_sequences['train']['token_type_ids'])
             f.create_dataset('valid_src_token_type_ids', data=processed_sequences['valid']['token_type_ids'])
 
@@ -76,7 +76,7 @@ def preprocessing(args):
         f.create_dataset('test_src_input_ids', data=processed_sequences['test']['input_ids'])
         f.create_dataset('test_src_attention_mask', data=processed_sequences['test']['attention_mask'])
         f.create_dataset('test_label', data=np.array(trg_list['test']).astype(int))
-        if args.model_type == 'bert':
+        if args.encoder_model_type == 'bert':
             f.create_dataset('test_src_token_type_ids', data=processed_sequences['test']['token_type_ids'])
 
     # Word2id pickle file save

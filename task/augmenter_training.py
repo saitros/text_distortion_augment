@@ -154,6 +154,7 @@ def augmenter_training(args):
 
     for epoch in range(start_epoch + 1, args.cls_num_epochs + 1):
         start_time_e = time()
+        model = encoder_parameter_grad(model, on=True)
 
         if cls_training_done:
             break
@@ -173,14 +174,14 @@ def augmenter_training(args):
             encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
             hidden_states = encoder_out
             if args.classify_method == 'latent_out':
-                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                latent_out = model.latent_encode(encoder_out=encoder_out)
                 hidden_states = latent_out
 
             # Classifier
             classifier_out = model.classify(hidden_states=hidden_states)
             cls_loss = cls_criterion(classifier_out, trg_label)
             if args.latent_mmd_loss:
-                mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+                mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
             else:
                 mmd_loss = torch.tensor(0)
 
@@ -217,14 +218,14 @@ def augmenter_training(args):
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
                 hidden_states = encoder_out
                 if args.classify_method == 'latent_out':
-                    latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                    latent_out = model.latent_encode(encoder_out=encoder_out)
                     hidden_states = latent_out
 
                 # Classifier
                 classifier_out = model.classify(hidden_states=hidden_states)
                 cls_loss = cls_criterion(classifier_out, trg_label)
                 if args.latent_mmd_loss:
-                    mmd_loss = compute_mmd(latent_encoder_out, z_var=args.z_variation) * 100
+                    mmd_loss = compute_mmd(latent_out, z_var=args.z_variation) * 100
                 else:
                     mmd_loss = torch.tensor(0)
 
@@ -278,35 +279,35 @@ def augmenter_training(args):
             src_sequence, src_att, src_seg, trg_label = b_iter
 
             # Encoding
-            with torch.no_grad():
-                encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-                latent_out = None
-                hidden_states = encoder_out
-                if args.encoder_out_mix_ratio != 0:
-                    latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
-                    hidden_states = latent_out
+            encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+            latent_out = None
+            hidden_states = encoder_out
+            if model.latent_out_mix_ratio != 0:
+                latent_out = model.latent_encode(encoder_out=encoder_out)
+                hidden_states = latent_out
 
             # Classifier Results
-            with torch.no_grad():
-                classifier_out = model.classify(hidden_states=hidden_states)
+            # with torch.no_grad():
+            #     classifier_out = model.classify(hidden_states=hidden_states)
 
             # Reconstruction
             recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
             # Additional Loss
-            encoder_out = model.encode(input_ids=recon_out.argmax(dim=2))
-            latent_out = None
-            hidden_states = encoder_out
-            if args.encoder_out_mix_ratio != 0:
-                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
-                hidden_states = latent_out
+            # encoder_out = model.encode(input_ids=recon_out.argmax(dim=2))
+            # latent_out = None
+            # hidden_states = encoder_out
+            # if args.encoder_out_mix_ratio != 0:
+            #     latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+            #     hidden_states = latent_out
 
-            re_classifier_out = model.classify(hidden_states=hidden_states)
-            cls_loss2 = cls_criterion(re_classifier_out, classifier_out.softmax(dim=1))
+            # re_classifier_out = model.classify(hidden_states=hidden_states)
+            # cls_loss2 = cls_criterion(re_classifier_out, classifier_out.softmax(dim=1))
+            cls_loss2 = torch.tensor(0)
 
             # Loss Backward
-            total_loss = recon_loss + (cls_loss2 * 100)
+            total_loss = recon_loss# + (cls_loss2 * 100)
             total_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -341,8 +342,8 @@ def augmenter_training(args):
             with torch.no_grad():
                 encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
                 latent_out = None
-                if args.encoder_out_mix_ratio != 0:
-                    latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                if model.latent_out_mix_ratio != 0:
+                    latent_out = model.latent_encode(encoder_out=encoder_out)
 
                 # Reconstruction
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
@@ -380,7 +381,7 @@ def augmenter_training(args):
 
         eps_dict, prob_dict = dict(), dict()
 
-        model = encoder_parameter_grad(model, on=True)
+        # model = encoder_parameter_grad(model, on=True)
 
         for phase in ['train', 'valid']:
             example_iter = next(iter(dataloader_dict[phase]))
@@ -397,22 +398,22 @@ def augmenter_training(args):
                 fliped_trg_label = torch.ones_like(trg_label) * 0.5
 
             # Forward
-            with torch.no_grad():
-                encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-                hidden_states = encoder_out
-                if args.classify_method == 'latent_out':
-                    latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
-                    hidden_states = latent_out
+            # with torch.no_grad():
+            encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+            hidden_states = encoder_out
+            if args.classify_method == 'latent_out':
+                latent_out = model.latent_encode(encoder_out=encoder_out)
+                hidden_states = latent_out
 
-                # Classifier
-                classifier_out = model.classify(hidden_states=hidden_states)
-                src_output_prob = F.softmax(classifier_out, dim=1)[0]
+            # Classifier
+            classifier_out = model.classify(hidden_states=hidden_states)
+            src_output_prob = F.softmax(classifier_out, dim=1)[0]
 
-                # Reconstruction
-                latent_out = None
-                if args.encoder_out_mix_ratio != 0:
-                    latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
-                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
+            # Reconstruction
+            latent_out = None
+            if model.latent_out_mix_ratio != 0:
+                latent_out = model.latent_encode(encoder_out=encoder_out)
+            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
             # Output Tokenizing & Pre-processing
             detokenized = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
@@ -426,7 +427,7 @@ def augmenter_training(args):
                                                  attention_mask=inp_dict['attention_mask'].to(device))
                 hidden_states_pre = encoder_out_eps_0
                 if args.classify_method == 'latent_out':
-                    latent_out_eps_0, _ = model.latent_encode(encoder_out=encoder_out_eps_0)
+                    latent_out_eps_0 = model.latent_encode(encoder_out=encoder_out_eps_0)
                     hidden_states_pre = latent_out_eps_0
 
                 classifier_out = model.classify(hidden_states=hidden_states_pre)
@@ -473,7 +474,7 @@ def augmenter_training(args):
                 hidden_states = encoder_out_eps_1
 
             if args.classify_method == 'latent_out':
-                latent_out_eps_1, _ = model.latent_encode(encoder_out=encoder_out_eps_1)
+                latent_out_eps_1 = model.latent_encode(encoder_out=encoder_out_eps_1)
                 hidden_states = latent_out_eps_1
 
             hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)

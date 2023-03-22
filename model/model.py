@@ -106,14 +106,14 @@ class TransformerModel(nn.Module):
 
     def latent_encode(self, encoder_out):
         latent_out = encoder_out.sum(dim=1) # (batch_size, d_hidden)
-        latent_encoder_out = self.latent_encoder(latent_out) # (batch_size, d_embedding)
-        latent_decoder_out = self.latent_decoder(latent_encoder_out) # (batch_size, d_hidden)
+        # latent_encoder_out = self.latent_encoder(latent_out) # (batch_size, d_embedding)
+        # latent_decoder_out = self.latent_decoder(latent_encoder_out) # (batch_size, d_hidden)
 
-        return latent_decoder_out, latent_encoder_out
+        return latent_out
 
     def classify(self, hidden_states):
         if hidden_states.dim() == 3:
-            hidden_states = hidden_states.sum(dim=1) # (batch_size, d_hidden)
+            hidden_states, _ = hidden_states.max(dim=1) # (batch_size, d_hidden)
 
         classifier_out = self.dropout(self.gelu(self.classifier1(hidden_states))) # (batch_size, d_embedding)
         classifier_out = self.dropout(self.gelu(self.classifier2(classifier_out))) # (batch_size, d_embedding)
@@ -147,7 +147,14 @@ class TransformerModel(nn.Module):
         decoder_outputs = decoder_outputs['last_hidden_state'] # (batch_size, seq_len, d_hidden)
 
         if self.encoder_out_to_augmenter:
-            decoder_outputs = torch.add(decoder_outputs, encoder_out)
+            if self.latent_out_mix_ratio == 0:
+                encoder_hidden_states = encoder_out
+            elif self.encoder_out_mix_ratio == 0:
+                encoder_hidden_states = latent_out
+                encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
+            else:
+                encoder_hidden_states = torch.add((self.encoder_out_mix_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
+            decoder_outputs = torch.add(decoder_outputs, encoder_hidden_states)
 
         decoder_outputs = self.dropout(F.gelu(self.decoder_linear(decoder_outputs)))
         decoder_outputs = self.decoder_augmenter(self.decoder_norm(decoder_outputs))

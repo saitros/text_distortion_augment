@@ -50,7 +50,7 @@ def augmenting(args):
 
     save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
 
-    with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'r') as f:
+    with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed.hdf5'), 'r') as f:
         train_src_input_ids = f.get('train_src_input_ids')[:]
         train_src_attention_mask = f.get('train_src_attention_mask')[:]
         train_trg_list = f.get('train_label')[:]
@@ -99,7 +99,7 @@ def augmenting(args):
     # 3) Model loading
     cudnn.benchmark = True
     cls_criterion = nn.CrossEntropyLoss().to(device)
-    save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint.pth.tar')
+    save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint_test2.pth.tar')
     checkpoint = torch.load(save_file_name)
     model.load_state_dict(checkpoint['model'])
     write_log(logger, f'Loaded augmenter model from {save_file_name}')
@@ -146,13 +146,13 @@ def augmenting(args):
             encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
             hidden_states = encoder_out
             if args.classify_method == 'latent_out':
-                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                latent_out = model.latent_encode(encoder_out=encoder_out)
                 hidden_states = latent_out
 
             # Reconstruction
             latent_out = None
             if args.encoder_out_mix_ratio != 0:
-                latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
+                latent_out = model.latent_encode(encoder_out=encoder_out)
 
             if args.test_decoding_strategy == 'greedy':
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
@@ -211,6 +211,7 @@ def augmenting(args):
         aug_prob_dict['fgsm'].extend(F.softmax(classifier_out_fgsm, dim=1).to('cpu').numpy().tolist())
 
         if args.debuging_mode:
+            print(aug_prob_dict)
             break
 
     # POST-PROCESSING

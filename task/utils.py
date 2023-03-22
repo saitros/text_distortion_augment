@@ -148,7 +148,7 @@ def tokenizing(args, src_list, tokenizer):
             )
             processed_sequences[phase]['input_ids'] = encoded_dict['input_ids']
             processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
-            if args.model_type == 'bert':
+            if args.encoder_model_type == 'bert':
                 processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
 
     else:
@@ -162,7 +162,7 @@ def tokenizing(args, src_list, tokenizer):
             )
             processed_sequences[phase]['input_ids'] = encoded_dict['input_ids']
             processed_sequences[phase]['attention_mask'] = encoded_dict['attention_mask']
-            if args.model_type == 'bert':
+            if args.encoder_model_type == 'bert':
                 processed_sequences[phase]['token_type_ids'] = encoded_dict['token_type_ids']
 
     return processed_sequences
