@@ -287,24 +287,23 @@ def augmenter_training(args):
                 hidden_states = latent_out
 
             # Classifier Results
-            # with torch.no_grad():
-            #     classifier_out = model.classify(hidden_states=hidden_states)
+            with torch.no_grad():
+                classifier_out = model.classify(hidden_states=hidden_states)
 
             # Reconstruction
             recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
             recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
 
             # Additional Loss
-            # encoder_out = model.encode(input_ids=recon_out.argmax(dim=2))
-            # latent_out = None
-            # hidden_states = encoder_out
-            # if args.encoder_out_mix_ratio != 0:
-            #     latent_out, latent_encoder_out = model.latent_encode(encoder_out=encoder_out)
-            #     hidden_states = latent_out
+            encoder_out = model.encode(input_ids=recon_out.argmax(dim=2))
+            latent_out = None
+            hidden_states = encoder_out
+            if args.encoder_out_mix_ratio != 1:
+                latent_out = model.latent_encode(encoder_out=encoder_out)
+                hidden_states = latent_out
 
-            # re_classifier_out = model.classify(hidden_states=hidden_states)
-            # cls_loss2 = cls_criterion(re_classifier_out, classifier_out.softmax(dim=1))
-            cls_loss2 = torch.tensor(0)
+            re_classifier_out = model.classify(hidden_states=hidden_states)
+            cls_loss2 = cls_criterion(re_classifier_out, classifier_out.softmax(dim=1))
 
             # Loss Backward
             total_loss = recon_loss# + (cls_loss2 * 100)

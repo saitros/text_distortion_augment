@@ -242,7 +242,7 @@ def augmenting(args):
     # Save with h5py
     save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
 
-    with h5py.File(os.path.join(save_path, 'processed_aug.hdf5'), 'w') as f:
+    with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed_aug.hdf5'), 'w') as f:
         # origin data
         f.create_dataset('train_src_input_ids', data=processed_aug_seq['origin']['input_ids'])
         f.create_dataset('train_src_attention_mask', data=processed_aug_seq['origin']['attention_mask'])
