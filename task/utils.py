@@ -131,6 +131,19 @@ def data_load(args):
 
     return src_list, trg_list
 
+def data_sampling(src_list, trg_list, args):
+
+    data_len = len(src_list['train'])
+    sample_num = int(data_len * args.sampling_ratio)
+
+    sample_indx = np.random.choice(data_len, sample_num, replace=False)
+
+    for k in src_list.keys():
+        src_list[k] = [src_list[k][i] for i in sample_indx]
+        trg_list[k] = [trg_list[k][i] for i in sample_indx]
+
+    return src_list, trg_list
+
 def tokenizing(args, src_list, tokenizer):
     processed_sequences = dict()
     processed_sequences['train'] = dict()

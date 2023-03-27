@@ -52,9 +52,9 @@ def training(args):
     write_log(logger, "Load data...")
     gc.disable()
 
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.model_type)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
 
-    with h5py.File(os.path.join(save_path, 'processed.hdf5'), 'r') as f:
+    with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed.hdf5'), 'r') as f:
         train_src_input_ids = f.get('train_src_input_ids')[:]
         train_src_attention_mask = f.get('train_src_attention_mask')[:]
         valid_src_input_ids = f.get('valid_src_input_ids')[:]
@@ -63,7 +63,7 @@ def training(args):
         train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
         valid_trg_list = f.get('valid_label')[:]
         valid_trg_list = F.one_hot(torch.tensor(valid_trg_list, dtype=torch.long)).numpy()
-        if args.model_type == 'bert':
+        if args.encoder_model_type == 'bert':
             train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
             valid_src_token_type_ids = f.get('valid_src_token_type_ids')[:]
         else:
@@ -71,16 +71,17 @@ def training(args):
             valid_src_token_type_ids = list()
 
     if args.train_with_aug:
-        aug_train_src_input_ids = f.get('train_src_input_ids')[:]
-        train_src_input_ids = np.concatenate((train_src_input_ids, aug_train_src_input_ids), axis=0)
-        aug_train_src_attention_mask = f.get('train_src_attention_mask')[:]
-        train_src_attention_mask = np.concatenate((train_src_input_ids, aug_train_src_input_ids), axis=0)
-        aug_train_trg_list = f.get('train_label')[:]
-        aug_train_trg_list = F.one_hot(torch.tensor(aug_train_trg_list, dtype=torch.long)).numpy()
-        train_trg_list = np.concatenate((train_trg_list, aug_train_trg_list), axis=0)
-        if args.model_type == 'bert':
-            aug_train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
-            train_src_token_type_ids = np.concatenate((train_src_token_type_ids, aug_train_src_token_type_ids), axis=0)
+        with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed_aug.hdf5'), 'r') as f:
+            aug_train_src_input_ids = f.get('train_src_input_ids')[:]
+            train_src_input_ids = np.concatenate((train_src_input_ids, aug_train_src_input_ids), axis=0)
+            aug_train_src_attention_mask = f.get('train_src_attention_mask')[:]
+            train_src_attention_mask = np.concatenate((train_src_input_ids, aug_train_src_input_ids), axis=0)
+            aug_train_trg_list = f.get('train_label')[:]
+            aug_train_trg_list = F.one_hot(torch.tensor(aug_train_trg_list, dtype=torch.long)).numpy()
+            train_trg_list = np.concatenate((train_trg_list, aug_train_trg_list), axis=0)
+            if args.encoder_model_type == 'bert':
+                aug_train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
+                train_src_token_type_ids = np.concatenate((train_src_token_type_ids, aug_train_src_token_type_ids), axis=0)
 
     with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
         data_ = pickle.load(f)

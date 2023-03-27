@@ -8,7 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 from transformers import AutoTokenizer
 # Import custom modules
-from task.utils import data_load, tokenizing
+from task.utils import data_load, data_sampling, tokenizing
 from utils import TqdmLoggingHandler, write_log, return_model_name
 
 from datasets import load_dataset
@@ -35,6 +35,7 @@ def preprocessing(args):
     write_log(logger, 'Start preprocessing!')
 
     src_list, trg_list = data_load(args)
+    src_list, trg_list = data_sampling(args)
     write_log(logger, 'Data loading done! ; {0}min spend'.format(round((time.time()-start_time)/60, 3)))
 
     #===================================#
