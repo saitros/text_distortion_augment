@@ -75,17 +75,17 @@ if __name__=='__main__':
     parser.add_argument('--latent_out_to_augmenter', default=True, type=str2bool,
                         help='Add decoder output and latent output to augmenter; Default is True')
     parser.add_argument('--latent_mmd_loss', default=False, type=str2bool,
-                        help='')
+                        help='Latent variable MMD loss; Default is False')
     parser.add_argument('--label_flipping', default=False, type=str2bool,
-                        help='')
+                        help='Label flipping; Default is False')
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']
-    parser.add_argument('--cls_optimizer', default='Ralamb', type=str, choices=optim_list,
+    parser.add_argument('--cls_optimizer', default='AdamW', type=str, choices=optim_list,
                         help="Choose optimizer setting in 'Ralamb', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--cls_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
-    parser.add_argument('--aug_optimizer', default='Ralamb', type=str, choices=optim_list,
+    parser.add_argument('--aug_optimizer', default='AdamW', type=str, choices=optim_list,
                         help="Choose optimizer setting in 'Ralamb', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--aug_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
@@ -104,8 +104,6 @@ if __name__=='__main__':
                         help='Classifier training epochs; Default is 10')
     parser.add_argument('--num_workers', default=8, type=int,
                         help='Num CPU Workers; Default is 8')
-    parser.add_argument('--num_grad_accumulate', default=5, type=int,
-                        help='')
     parser.add_argument('--batch_size', default=16, type=int,
                         help='Batch size; Default is 16')
     parser.add_argument('--lr', default=5e-4, type=float,
@@ -115,9 +113,9 @@ if __name__=='__main__':
     parser.add_argument('--clip_grad_norm', default=5, type=int,
                         help='Graddient clipping norm; Default is 5')
     parser.add_argument('--label_smoothing_eps', default=0.05, type=float,
-                        help='')
+                        help='Label smoothing epsilon; Default is 0.05')
     parser.add_argument('--dropout', default=0.3, type=float,
-                        help='')
+                        help='Dropout ratio; Default is 0.3')
     parser.add_argument('--z_variation', default=2, type=float,
                         help='')
     # Testing setting
