@@ -72,11 +72,11 @@ def training(args):
 
     if args.train_with_aug:
         with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed_aug.hdf5'), 'r') as f:
-            aug_train_src_input_ids = f.get('train_src_input_ids')[:]
+            aug_train_src_input_ids = f.get('train_fgsm_src_input_ids')[:]
             train_src_input_ids = np.concatenate((train_src_input_ids, aug_train_src_input_ids), axis=0)
-            aug_train_src_attention_mask = f.get('train_src_attention_mask')[:]
+            aug_train_src_attention_mask = f.get('train_fgsm_src_attention_mask')[:]
             train_src_attention_mask = np.concatenate((train_src_input_ids, aug_train_src_input_ids), axis=0)
-            aug_train_trg_list = f.get('train_label')[:]
+            aug_train_trg_list = f.get('train_fgsm_label')[:]
             aug_train_trg_list = F.one_hot(torch.tensor(aug_train_trg_list, dtype=torch.long)).numpy()
             train_trg_list = np.concatenate((train_trg_list, aug_train_trg_list), axis=0)
             if args.encoder_model_type == 'bert':

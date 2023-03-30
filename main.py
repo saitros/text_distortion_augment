@@ -53,6 +53,10 @@ if __name__=='__main__':
     # Preprocessing setting
     parser.add_argument('--valid_ratio', default=0.2, type=float,
                         help='Validation split ratio; Default is 0.2')
+    parser.add_argument('--min_len', default=4, type=int,
+                        help="Sentences's minimum length; Default is 4")
+    parser.add_argument('--src_max_len', default=200, type=int,
+                        help="Sentences's minimum length; Default is 200")
     # Model setting
     parser.add_argument('--isPreTrain', default=True, type=str2bool,
                         help='Use pre-trained language model; Default is True')
@@ -60,8 +64,8 @@ if __name__=='__main__':
                         help='Classification model type; Default is BART')
     parser.add_argument('--decoder_model_type', default='bart', type=str,
                         help='Augmentation model type; Default is BART')
-    parser.add_argument('--classify_method', default='latent_out', type=str, choices=['encoder_out', 'latent_out'],
-                        help='')
+    parser.add_argument('--classify_method', default='encoder_out', type=str, choices=['encoder_out', 'latent_out'],
+                        help='Classification method; Default is encoder_out')
     parser.add_argument('--encoder_out_mix_ratio', default=0.3, type=float,
                         help='Encoder output ratio to input of decoder; Default is 0.3')
     parser.add_argument('--encoder_out_cross_attention', default=True, type=str2bool,
@@ -77,15 +81,14 @@ if __name__=='__main__':
     # Optimizer & LR_Scheduler setting
     optim_list = ['AdamW', 'Adam', 'SGD', 'Ralamb']
     scheduler_list = ['constant', 'warmup', 'reduce_train', 'reduce_valid', 'lambda']
-    parser.add_argument('--cls_optimizer', default='AdamW', type=str, choices=optim_list,
-                        help="Choose optimizer setting in 'AdamW', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
+    parser.add_argument('--cls_optimizer', default='Ralamb', type=str, choices=optim_list,
+                        help="Choose optimizer setting in 'Ralamb', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--cls_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
-    parser.add_argument('--aug_optimizer', default='AdamW', type=str, choices=optim_list,
-                        help="Choose optimizer setting in 'AdamW', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
+    parser.add_argument('--aug_optimizer', default='Ralamb', type=str, choices=optim_list,
+                        help="Choose optimizer setting in 'Ralamb', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--aug_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
-
     parser.add_argument('--cls_lr', default=1e-5, type=float,
                         help='Maximum learning rate of warmup scheduler; Default is 5e-4')
     parser.add_argument('--aug_lr', default=5e-5, type=float,
@@ -95,10 +98,6 @@ if __name__=='__main__':
     parser.add_argument('--lr_lambda', default=0.95, type=float,
                         help="Lambda learning scheduler's lambda; Default is 0.95")
     # Training setting
-    parser.add_argument('--min_len', default=4, type=int,
-                        help="Sentences's minimum length; Default is 4")
-    parser.add_argument('--src_max_len', default=200, type=int,
-                        help="Sentences's minimum length; Default is 200")
     parser.add_argument('--aug_num_epochs', default=5, type=int,
                         help='Augmenter training epochs; Default is 10')
     parser.add_argument('--cls_num_epochs', default=3, type=int,
@@ -147,6 +146,8 @@ if __name__=='__main__':
                         help='Random seed; Default is 42')
     parser.add_argument('--print_freq', default=300, type=int,
                         help='Print training process frequency; Default is 300')
+    parser.add_argument('--sampling_ratio', default=0.2, type=float,
+                        help='')
     args = parser.parse_args()
 
     main(args)

@@ -23,11 +23,11 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 # Import custom modules
 from model.model import TransformerModel
 from model.dataset import CustomDataset
-from model.loss import compute_mmd, CustomLoss
+from model.loss import compute_mmd
 from optimizer.utils import shceduler_select, optimizer_select
 from optimizer.scheduler import get_cosine_schedule_with_warmup
-from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
-from task.utils import input_to_device, encoder_parameter_grad
+from utils import TqdmLoggingHandler, write_log, get_tb_exp_name, return_model_name
+from task.utils import data_load, data_sampling, tokenizing, input_to_device, encoder_parameter_grad
 
 def augmenter_training(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -46,40 +46,39 @@ def augmenter_training(args):
     write_log(logger, 'Start training!')
 
     #===================================#
-    #============Data Load==============#
+    #=============Data Load=============#
     #===================================#
 
-    # 1) Data open
     write_log(logger, "Load data...")
-    gc.disable()
 
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
+    start_time = time()
+    total_src_list, total_trg_list = data_load(args)
+    total_src_list, total_trg_list = data_sampling(args, total_src_list, total_trg_list)
+    num_labels = len(set(total_trg_list['train']))
+    write_log(logger, 'Data loading done!')
 
-    with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed.hdf5'), 'r') as f:
-        train_src_input_ids = f.get('train_src_input_ids')[:]
-        train_src_attention_mask = f.get('train_src_attention_mask')[:]
-        valid_src_input_ids = f.get('valid_src_input_ids')[:]
-        valid_src_attention_mask = f.get('valid_src_attention_mask')[:]
-        train_trg_list = f.get('train_label')[:]
-        train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
-        valid_trg_list = f.get('valid_label')[:]
-        valid_trg_list = F.one_hot(torch.tensor(valid_trg_list, dtype=torch.long)).numpy()
-        if args.encoder_model_type == 'bert':
-            train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
-            valid_src_token_type_ids = f.get('valid_src_token_type_ids')[:]
-        else:
-            train_src_token_type_ids = list()
-            valid_src_token_type_ids = list()
+    # 2) Dataloader setting
+    write_log(logger, "CustomDataset setting...")
+    tokenizer_name = return_model_name(args.encoder_model_type)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-    with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
-        data_ = pickle.load(f)
-        src_word2id = data_['src_word2id']
-        src_vocab_num = len(src_word2id)
-        num_labels = data_['num_labels']
-        del data_
-
-    gc.enable()
-    write_log(logger, "Finished loading data!")
+    dataset_dict = {
+        'train': CustomDataset(tokenizer=tokenizer,
+                               src_list=total_src_list['train'], src_list2=total_src_list['train2'], 
+                               trg_list=total_trg_list['train'], src_max_len=args.src_max_len),
+        'valid': CustomDataset(tokenizer=tokenizer,
+                               src_list=total_src_list['valid'], src_list2=total_src_list['valid2'], 
+                               trg_list=total_trg_list['valid'], src_max_len=args.src_max_len)
+    }
+    dataloader_dict = {
+        'train': DataLoader(dataset_dict['train'], drop_last=True,
+                            batch_size=args.batch_size, shuffle=True,
+                            pin_memory=True, num_workers=args.num_workers),
+        'valid': DataLoader(dataset_dict['valid'], drop_last=False,
+                            batch_size=args.batch_size, shuffle=True, pin_memory=True,
+                            num_workers=args.num_workers)
+    }
+    write_log(logger, f"Total number of trainingsets iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
 
     #===================================#
     #===========Train setting===========#
@@ -94,31 +93,7 @@ def augmenter_training(args):
                              src_max_len=args.src_max_len, num_labels=num_labels, dropout=args.dropout)
     model.to(device)
 
-    # 2) Dataloader setting
-    dataset_dict = {
-        'train': CustomDataset(src_list=train_src_input_ids, src_att_list=train_src_attention_mask,
-                               src_seg_list=train_src_token_type_ids,
-                               trg_list=train_trg_list, src_max_len=args.src_max_len),
-        'valid': CustomDataset(src_list=valid_src_input_ids, src_att_list=valid_src_attention_mask,
-                               src_seg_list=valid_src_token_type_ids,
-                               trg_list=valid_trg_list, src_max_len=args.src_max_len)
-    }
-    dataloader_dict = {
-        'train': DataLoader(dataset_dict['train'], drop_last=True,
-                            batch_size=args.batch_size, shuffle=True,
-                            pin_memory=True, num_workers=args.num_workers),
-        'valid': DataLoader(dataset_dict['valid'], drop_last=False,
-                            batch_size=args.batch_size, shuffle=True, pin_memory=True,
-                            num_workers=args.num_workers)
-    }
-    write_log(logger, f"Total number of trainingsets iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
-
-    del (
-        train_src_input_ids, train_src_attention_mask, train_src_token_type_ids, train_trg_list,
-        valid_src_input_ids, valid_src_attention_mask, valid_src_token_type_ids, valid_trg_list
-    )
-
-    # 3) Optimizer & Learning rate scheduler setting
+    # 2) Optimizer & Learning rate scheduler setting
     cls_optimizer = optimizer_select(optimizer_model=args.cls_optimizer, model=model, lr=args.cls_lr, w_decay=args.w_decay)
     aug_optimizer = optimizer_select(optimizer_model=args.aug_optimizer, model=model, lr=args.aug_lr, w_decay=args.w_decay)
     cls_scheduler = shceduler_select(phase='cls', scheduler_model=args.cls_scheduler, optimizer=cls_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)

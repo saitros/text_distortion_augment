@@ -33,13 +33,16 @@ def data_load(args):
 
         train_index, valid_index, test_index = data_split_index(train_dat, valid_ratio=args.valid_ratio, test_ratio=0)
 
-        src_list['train'] = [train_dat['text'][i] for i in tqdm(train_index)]
-        trg_list['train'] = [train_dat['label'][i] for i in tqdm(train_index)]
+        src_list['train'] = np.array(train_dat['text'])[train_index]
+        src_list['train2'] = None
+        trg_list['train'] = np.array(train_dat['label'])[train_index]
 
-        src_list['valid'] = [train_dat['text'][i] for i in tqdm(valid_index)]
-        trg_list['valid'] = [train_dat['label'][i] for i in tqdm(valid_index)]
+        src_list['valid'] = np.array(train_dat['text'])[valid_index]
+        src_list['valid2'] = None
+        trg_list['valid'] = np.array(train_dat['label'])[valid_index]
 
         src_list['test'] = test_dat['text']
+        src_list['test2'] = None
         trg_list['test'] = test_dat['label']
 
     if args.data_name == 'sst2':
@@ -48,14 +51,17 @@ def data_load(args):
         valid_dat = pd.DataFrame(dataset['validation'])
         test_dat = pd.DataFrame(dataset['test'])
 
-        src_list['train'] = train_dat['sentence'].tolist()
-        trg_list['train'] = train_dat['label'].tolist()
+        src_list['train'] = np.array(train_dat['sentence'])
+        src_list['train2'] = None
+        trg_list['train'] = np.array(train_dat['label'])
 
-        src_list['valid'] = valid_dat['sentence'].tolist()
-        trg_list['valid'] = valid_dat['label'].tolist()
+        src_list['valid'] = np.array(valid_dat['sentence'])
+        src_list['valid2'] = None
+        trg_list['valid'] = np.array(valid_dat['label'])
 
-        src_list['test'] = test_dat['sentence'].tolist()
-        trg_list['test'] = test_dat['label'].tolist()
+        src_list['test'] = np.array(test_dat['sentence'])
+        src_list['test2'] = None
+        trg_list['test'] = np.array(test_dat['label'])
 
     if args.data_name == 'cola':
         dataset = load_dataset("glue", args.data_name)
@@ -63,14 +69,17 @@ def data_load(args):
         valid_dat = pd.DataFrame(dataset['validation'])
         test_dat = pd.DataFrame(dataset['test'])
 
-        src_list['train'] = train_dat['sentence'].tolist()
-        trg_list['train'] = train_dat['label'].tolist()
+        src_list['train'] = np.array(train_dat['sentence'])
+        src_list['train2'] = None
+        trg_list['train'] = np.array(train_dat['label'])
 
-        src_list['valid'] = valid_dat['sentence'].tolist()
-        trg_list['valid'] = valid_dat['label'].tolist()
+        src_list['valid'] = np.array(valid_dat['sentence'])
+        src_list['valid2'] = None
+        trg_list['valid'] = np.array(valid_dat['label'])
 
-        src_list['test'] = test_dat['sentence'].tolist()
-        trg_list['test'] = test_dat['label'].tolist()
+        src_list['test'] = np.array(test_dat['sentence'])
+        src_list['test2'] = None
+        trg_list['test'] = np.array(test_dat['label'])
 
     if args.data_name == 'mnli':
         dataset = load_dataset("glue", args.data_name)
@@ -78,16 +87,16 @@ def data_load(args):
         valid_dat = pd.DataFrame(dataset['validation_matched'])
         test_dat = pd.DataFrame(dataset['test_matched'])
 
-        src_list['train_sent1'] = train_dat['premise'].tolist()
-        src_list['train_sent2'] = train_dat['hypothesis'].tolist()
+        src_list['train'] = train_dat['premise'].tolist()
+        src_list['train2'] = train_dat['hypothesis'].tolist()
         trg_list['train'] = train_dat['label'].tolist()
 
-        src_list['valid_sent1'] = valid_dat['premise'].tolist()
-        src_list['valid_sent2'] = valid_dat['hypothesis'].tolist()
+        src_list['valid'] = valid_dat['premise'].tolist()
+        src_list['valid2'] = valid_dat['hypothesis'].tolist()
         trg_list['valid'] = valid_dat['label'].tolist()
 
-        src_list['test_sent1'] = test_dat['premise'].tolist()
-        src_list['test_sent2'] = test_dat['hypothesis'].tolist()
+        src_list['test'] = test_dat['premise'].tolist()
+        src_list['test2'] = test_dat['hypothesis'].tolist()
         trg_list['test'] = test_dat['label'].tolist()
 
     if args.data_name == 'mrpc':
@@ -96,16 +105,16 @@ def data_load(args):
         valid_dat = pd.DataFrame(dataset['validation_matched'])
         test_dat = pd.DataFrame(dataset['test_matched'])
 
-        src_list['train_sent1'] = train_dat['sentence1'].tolist()
-        src_list['train_sent2'] = train_dat['sentence2'].tolist()
+        src_list['train'] = train_dat['sentence1'].tolist()
+        src_list['train2'] = train_dat['sentence2'].tolist()
         trg_list['train'] = train_dat['label'].tolist()
 
-        src_list['valid_sent1'] = valid_dat['sentence1'].tolist()
-        src_list['valid_sent2'] = valid_dat['sentence2'].tolist()
+        src_list['valid'] = valid_dat['sentence1'].tolist()
+        src_list['valid2'] = valid_dat['sentence2'].tolist()
         trg_list['valid'] = valid_dat['label'].tolist()
 
-        src_list['test_sent1'] = test_dat['sentence1'].tolist()
-        src_list['test_sent2'] = test_dat['sentence2'].tolist()
+        src_list['test'] = test_dat['sentence1'].tolist()
+        src_list['test2'] = test_dat['sentence2'].tolist()
         trg_list['test'] = test_dat['label'].tolist()
 
     if args.data_name == 'korean_hate_speech':
@@ -123,24 +132,28 @@ def data_load(args):
         valid_dat['label'] = valid_dat['label'].replace('offensive', 2)
 
         src_list['train'] = train_dat['comments'].tolist()
+        src_list['train2'] = None
         trg_list['train'] = train_dat['label'].tolist()
         src_list['valid'] = valid_dat['comments'].tolist()
+        src_list['valid2'] = None
         trg_list['valid'] = valid_dat['label'].tolist()
         src_list['test'] = test_dat['comments'].tolist()
+        src_list['test2'] = None
         trg_list['test'] = [0 for _ in range(len(test_dat))]
 
     return src_list, trg_list
 
-def data_sampling(src_list, trg_list, args):
+def data_sampling(args, src_list, trg_list):
 
     data_len = len(src_list['train'])
     sample_num = int(data_len * args.sampling_ratio)
 
     sample_indx = np.random.choice(data_len, sample_num, replace=False)
 
-    for k in src_list.keys():
-        src_list[k] = [src_list[k][i] for i in sample_indx]
-        trg_list[k] = [trg_list[k][i] for i in sample_indx]
+    src_list['train'] = src_list['train'][sample_indx]
+    trg_list['train'] = trg_list['train'][sample_indx]
+    if src_list['train2'] != None:
+        src_list['train2'] = src_list['train2'][sample_indx]
 
     return src_list, trg_list
 
