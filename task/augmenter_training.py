@@ -19,7 +19,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.cuda.amp import GradScaler, autocast
 #from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, RandomSampler
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoTokenizer
 # Import custom modules
 from model.model import TransformerModel
 from model.dataset import CustomDataset
@@ -61,6 +61,7 @@ def augmenter_training(args):
     write_log(logger, "CustomDataset setting...")
     tokenizer_name = return_model_name(args.encoder_model_type)
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    src_vocab_num = tokenizer.vocab_size
 
     dataset_dict = {
         'train': CustomDataset(tokenizer=tokenizer,
