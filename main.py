@@ -15,6 +15,9 @@ def main(args):
     # Time setting
     total_start_time = time.time()
 
+    # Seed setting
+    set_random_seed(args.random_seed)
+
     # Path setting
     path_check(args)
 
@@ -121,6 +124,8 @@ if __name__=='__main__':
     # Testing setting
     parser.add_argument('--grad_epsilon', default=0.001, type=float,
                         help='')
+    parser.add_argument('--epsilon_repeat', default=3, type=int,
+                        help='')
     parser.add_argument('--test_batch_size', default=32, type=int,
                         help='Test batch size; Default is 32')
     parser.add_argument('--test_decoding_strategy', default='beam', choices=['greedy', 'beam', 'multinomial', 'topk', 'topp'], type=str,
@@ -140,10 +145,12 @@ if __name__=='__main__':
     parser.add_argument('--augmenting_label', default='hard', type=str,
                         help='')
     # Seed & Logging setting
-    parser.add_argument('--seed', default=42, type=int,
+    parser.add_argument('--random_seed', default=42, type=int,
                         help='Random seed; Default is 42')
     parser.add_argument('--print_freq', default=300, type=int,
                         help='Print training process frequency; Default is 300')
+    parser.add_argument('--print_example', default=True, type=str2bool,
+                        help='Print augmented example; Default is True')
     parser.add_argument('--sampling_ratio', default=0.2, type=float,
                         help='')
     args = parser.parse_args()

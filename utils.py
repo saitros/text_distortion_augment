@@ -96,7 +96,7 @@ def get_tb_exp_name(args:argparse.Namespace):
 
     return exp_name
 
-def set_random_seed(seed:int):
+def set_random_seed(seed: int):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)

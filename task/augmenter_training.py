@@ -220,7 +220,7 @@ def augmenter_training(args):
         write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
         write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint_test2.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
         if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -282,7 +282,7 @@ def augmenter_training(args):
             cls_loss2 = cls_criterion(re_classifier_out, classifier_out.softmax(dim=1))
 
             # Loss Backward
-            total_loss = recon_loss# + (cls_loss2 * 100)
+            total_loss = recon_loss #+ (cls_loss2 * 100)
             total_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -332,7 +332,7 @@ def augmenter_training(args):
         val_recon_loss /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint_test2.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
@@ -354,128 +354,126 @@ def augmenter_training(args):
         #=========Text Augmentation=========#
         #===================================#
 
-        eps_dict, prob_dict = dict(), dict()
+        if args.print_example:
 
-        # model = encoder_parameter_grad(model, on=True)
+            eps_dict, prob_dict = dict(), dict()
 
-        for phase in ['train', 'valid']:
-            example_iter = next(iter(dataloader_dict[phase]))
+            # model = encoder_parameter_grad(model, on=True)
 
-            example_iter_ = input_to_device(example_iter, device=device)
-            src_sequence, src_att, src_seg, trg_label = example_iter_
+            for phase in ['train', 'valid']:
+                example_iter = next(iter(dataloader_dict[phase]))
 
-            src_output = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
+                example_iter_ = input_to_device(example_iter, device=device)
+                src_sequence, src_att, src_seg, trg_label = example_iter_
 
-            # Target Label Setting
-            if args.label_flipping:
-                fliped_trg_label = torch.flip(trg_label, dims=[1]).to(device)
-            else:
-                fliped_trg_label = torch.ones_like(trg_label) * 0.5
+                src_output = model.tokenizer.batch_decode(src_sequence, skip_special_tokens=True)[0]
 
-            # Forward
-            # with torch.no_grad():
-            encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
-            hidden_states = encoder_out
-            if args.classify_method == 'latent_out':
-                latent_out = model.latent_encode(encoder_out=encoder_out)
-                hidden_states = latent_out
-
-            # Classifier
-            classifier_out = model.classify(hidden_states=hidden_states)
-            src_output_prob = F.softmax(classifier_out, dim=1)[0]
-
-            # Reconstruction
-            latent_out = None
-            if model.latent_out_mix_ratio != 0:
-                latent_out = model.latent_encode(encoder_out=encoder_out)
-            recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
-
-            # Output Tokenizing & Pre-processing
-            detokenized = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
-            eps_dict['eps_0'] = detokenized[0]
-            inp_dict = model.tokenizer(detokenized, max_length=args.src_max_len,
-                                       padding='max_length', truncation=True, return_tensors='pt')
-
-            # Probability Calculate
-            with torch.no_grad():
-                encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device),
-                                                 attention_mask=inp_dict['attention_mask'].to(device))
-                hidden_states_pre = encoder_out_eps_0
-                if args.classify_method == 'latent_out':
-                    latent_out_eps_0 = model.latent_encode(encoder_out=encoder_out_eps_0)
-                    hidden_states_pre = latent_out_eps_0
-
-                classifier_out = model.classify(hidden_states=hidden_states_pre)
-                prob_dict['eps_0'] = F.softmax(classifier_out, dim=1)[0]
-
-            hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
-            classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-
-            for _ in range(3):
-
-                model.zero_grad()
-                cls_loss = cls_criterion(classifier_out, fliped_trg_label)
-                cls_loss.backward()
-                hidden_states_grad = hidden_states_grad_true.grad.data.sign()
-                
-                # Gradient-based Modification
-                if args.classify_method == 'latent_out':
-                    encoder_out_copy = encoder_out.clone().detach()
-                    latent_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
-                    hidden_states_grad_true = latent_out_copy.clone().detach().requires_grad_(True)
+                # Target Label Setting
+                if args.label_flipping:
+                    fliped_trg_label = torch.flip(trg_label, dims=[1]).to(device)
                 else:
-                    encoder_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
-                    latent_out_copy = None
-                    hidden_states_grad_true = encoder_out_copy.clone().detach().requires_grad_(True)
+                    fliped_trg_label = torch.ones_like(trg_label) * 0.5
 
+                # Forward
+                # with torch.no_grad():
+                encoder_out = model.encode(input_ids=src_sequence, attention_mask=src_att)
+                hidden_states = encoder_out
+                if args.classify_method == 'latent_out':
+                    latent_out = model.latent_encode(encoder_out=encoder_out)
+                    hidden_states = latent_out
+
+                # Classifier
+                classifier_out = model.classify(hidden_states=hidden_states)
+                src_output_prob = F.softmax(classifier_out, dim=1)[0]
+
+                # Reconstruction
+                latent_out = None
+                if model.latent_out_mix_ratio != 0:
+                    latent_out = model.latent_encode(encoder_out=encoder_out)
+                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
+
+                # Output Tokenizing & Pre-processing
+                detokenized = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
+                eps_dict['eps_0'] = detokenized[0]
+                inp_dict = model.tokenizer(detokenized, max_length=args.src_max_len,
+                                        padding='max_length', truncation=True, return_tensors='pt')
+
+                # Probability Calculate
+                with torch.no_grad():
+                    encoder_out_eps_0 = model.encode(input_ids=inp_dict['input_ids'].to(device),
+                                                    attention_mask=inp_dict['attention_mask'].to(device))
+                    hidden_states_pre = encoder_out_eps_0
+                    if args.classify_method == 'latent_out':
+                        latent_out_eps_0 = model.latent_encode(encoder_out=encoder_out_eps_0)
+                        hidden_states_pre = latent_out_eps_0
+
+                    classifier_out = model.classify(hidden_states=hidden_states_pre)
+                    prob_dict['eps_0'] = F.softmax(classifier_out, dim=1)[0]
+
+                hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
                 classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-                revised_prob = F.softmax(classifier_out, dim=1)[0]
 
-            with torch.no_grad():
-                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
-                recon_decoding = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
-                eps_dict['eps_1'] = recon_decoding[0]
+                for _ in range(args.epsilon_repeat):
 
-            inp_dict = model.tokenizer(recon_decoding,
-                                        max_length = args.src_max_len,
-                                        padding='max_length',
-                                        truncation=True,
-                                        return_tensors='pt')
+                    model.zero_grad()
+                    cls_loss = cls_criterion(classifier_out, fliped_trg_label)
+                    cls_loss.backward()
+                    hidden_states_grad = hidden_states_grad_true.grad.data.sign()
+                    
+                    # Gradient-based Modification
+                    if args.classify_method == 'latent_out':
+                        encoder_out_copy = encoder_out.clone().detach()
+                        latent_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                        hidden_states_grad_true = latent_out_copy.clone().detach().requires_grad_(True)
+                    else:
+                        encoder_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                        latent_out_copy = None
+                        hidden_states_grad_true = encoder_out_copy.clone().detach().requires_grad_(True)
 
-            # Probability Calculate
-            with torch.no_grad():
-                encoder_out_eps_1 = model.encode(input_ids=inp_dict['input_ids'].to(device),
-                                                 attention_mask=inp_dict['attention_mask'].to(device))
-                hidden_states = encoder_out_eps_1
+                    classifier_out = model.classify(hidden_states=hidden_states_grad_true)
+                    revised_prob = F.softmax(classifier_out, dim=1)[0]
 
-            if args.classify_method == 'latent_out':
-                latent_out_eps_1 = model.latent_encode(encoder_out=encoder_out_eps_1)
-                hidden_states = latent_out_eps_1
+                with torch.no_grad():
+                    recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
+                    recon_decoding = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
+                    eps_dict['eps_1'] = recon_decoding[0]
 
-            hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
-            classifier_out = model.classify(hidden_states=hidden_states_grad_true)
-            prob_dict['eps_1'] = F.softmax(classifier_out, dim=1)[0]
+                inp_dict = model.tokenizer(recon_decoding,
+                                            max_length = args.src_max_len,
+                                            padding='max_length',
+                                            truncation=True,
+                                            return_tensors='pt')
 
-            dict_key = prob_dict.keys()
+                # Probability Calculate
+                with torch.no_grad():
+                    encoder_out_eps_1 = model.encode(input_ids=inp_dict['input_ids'].to(device),
+                                                    attention_mask=inp_dict['attention_mask'].to(device))
+                    hidden_states = encoder_out_eps_1
 
-            write_log(logger, f'Generated Examples')
-            write_log(logger, f'Epsilon repeat: 3')
-            write_log(logger, f'Phase: {phase}')
-            write_log(logger, f'Source: {src_output}')
-            write_log(logger, f'Source Probability: {src_output_prob}')
-            write_log(logger, f'Reconstructed: {eps_dict["eps_0"]}')
-            write_log(logger, f'Reconstructed Probability: {prob_dict["eps_0"]}')
-            write_log(logger, '-'*50)
-            write_log(logger, f'Revised Probability: {revised_prob}')
-            write_log(logger, f'Augmented: {eps_dict["eps_1"]}')
-            write_log(logger, f'Augmented Probability: {prob_dict["eps_1"]}')
+                if args.classify_method == 'latent_out':
+                    latent_out_eps_1 = model.latent_encode(encoder_out=encoder_out_eps_1)
+                    hidden_states = latent_out_eps_1
+
+                hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
+                classifier_out = model.classify(hidden_states=hidden_states_grad_true)
+                prob_dict['eps_1'] = F.softmax(classifier_out, dim=1)[0]
+
+                dict_key = prob_dict.keys()
+
+                write_log(logger, f'Generated Examples')
+                write_log(logger, f'Epsilon repeat: {args.args.epsilon_repeat}')
+                write_log(logger, f'Phase: {phase}')
+                write_log(logger, f'Source: {src_output}')
+                write_log(logger, f'Source Probability: {src_output_prob}')
+                write_log(logger, f'Reconstructed: {eps_dict["eps_0"]}')
+                write_log(logger, f'Reconstructed Probability: {prob_dict["eps_0"]}')
+                write_log(logger, '-'*50)
+                write_log(logger, f'Revised Probability: {revised_prob}')
+                write_log(logger, f'Augmented: {eps_dict["eps_1"]}')
+                write_log(logger, f'Augmented Probability: {prob_dict["eps_1"]}')
 
     # 3) Results
     write_log(logger, f'Best AUG Epoch: {best_aug_epoch}')
     write_log(logger, f'Best AUG Loss: {round(best_aug_val_loss.item(), 2)}')
     write_log(logger, f'Best CLS Epoch: {best_cls_epoch}')
     write_log(logger, f'Best CLS Loss: {round(best_cls_val_loss.item(), 2)}')
-
-# 1. 단순 reconstruction때는 [0,1]로 문장 나오면 되고
-# 2. augment 한거는 옮겨진 만큼으로 나오면 되고
-# 1 학습 하고 2 학습 하고

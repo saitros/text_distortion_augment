@@ -99,7 +99,7 @@ def augmenting(args):
     # 3) Model loading
     cudnn.benchmark = True
     cls_criterion = nn.CrossEntropyLoss().to(device)
-    save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, 'checkpoint_test2.pth.tar')
+    save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
     checkpoint = torch.load(save_file_name)
     model.load_state_dict(checkpoint['model'])
     write_log(logger, f'Loaded augmenter model from {save_file_name}')
