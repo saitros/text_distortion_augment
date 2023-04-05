@@ -18,10 +18,10 @@ Before training the model, it needs to go through a preprocessing step. Preproce
 python main.py --preprocessing
 ```
 
-## Training
+## Augmenter Training
 
-To train the model, add the training (--training) option. Currently, only the Transformer model is available, but RNN and Pre-trained Language Model will be added in the future.
+To train the augmentation model, add the augmenter training (--augmenter_training) option. Currently, only the Transformer-based pre-trained language model is available, but RNN will be added in the future.
 
 ```
-python main.py --training
+python main.py --augmenter_training
 ```
