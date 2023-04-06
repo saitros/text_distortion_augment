@@ -41,31 +41,22 @@ def augmenting(args):
     write_log(logger, 'Start training!')
 
     #===================================#
-    #============Data Load==============#
+    #=============Data Load=============#
     #===================================#
 
-    # 1) Data open
     write_log(logger, "Load data...")
-    gc.disable()
 
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
+    start_time = time()
+    total_src_list, total_trg_list = data_load(args)
+    total_src_list, total_trg_list = data_sampling(args, total_src_list, total_trg_list)
+    num_labels = len(set(total_trg_list['train']))
+    write_log(logger, 'Data loading done!')
 
-    with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed.hdf5'), 'r') as f:
-        train_src_input_ids = f.get('train_src_input_ids')[:]
-        train_src_attention_mask = f.get('train_src_attention_mask')[:]
-        train_trg_list = f.get('train_label')[:]
-        train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
-        if args.encoder_model_type == 'bert':
-            train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
-        else:
-            train_src_token_type_ids = list()
-
-    with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
-        data_ = pickle.load(f)
-        src_word2id = data_['src_word2id']
-        src_vocab_num = len(src_word2id)
-        num_labels = data_['num_labels']
-        del data_
+    # 2) Dataloader setting
+    write_log(logger, "CustomDataset setting...")
+    tokenizer_name = return_model_name(args.encoder_model_type)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    src_vocab_num = tokenizer.vocab_size
 
     gc.enable()
     write_log(logger, "Finished loading data!")
@@ -85,16 +76,16 @@ def augmenting(args):
 
     # 2) Dataloader setting
     dataset_dict = {
-        'train': CustomDataset(src_list=train_src_input_ids, src_att_list=train_src_attention_mask,
-                               src_seg_list=train_src_token_type_ids,
-                               trg_list=train_trg_list, src_max_len=args.src_max_len)
+        'train': CustomDataset(tokenizer=tokenizer,
+                               src_list=total_src_list['train'], src_list2=total_src_list['train2'], 
+                               trg_list=total_trg_list['train'], src_max_len=args.src_max_len),
     }
     dataloader_dict = {
         'train': DataLoader(dataset_dict['train'], drop_last=True,
                             batch_size=args.batch_size, shuffle=True,
                             pin_memory=True, num_workers=args.num_workers)
     }
-    write_log(logger, f"Total number of trainingsets  iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
+    write_log(logger, f"Total number of trainingsets iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
 
     # 3) Model loading
     cudnn.benchmark = True
