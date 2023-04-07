@@ -21,7 +21,7 @@ from torch.cuda.amp import GradScaler, autocast
 # Import custom modules
 from model.model import TransformerModel
 from model.dataset import CustomDataset
-from utils import TqdmLoggingHandler, write_log
+from utils import TqdmLoggingHandler, write_log, return_model_name
 from task.utils import input_to_device, tokenizing
 
 def augmenting(args):
