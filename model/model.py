@@ -22,7 +22,7 @@ class TransformerModel(nn.Module):
         super().__init__()
 
         """
-        Initialize WAE model
+        Initialize augmenter model
 
         Args:
             encoder_config (dictionary): encoder transformer's configuration
@@ -188,19 +188,19 @@ class TransformerModel(nn.Module):
             else:
                 src_key_padding_mask = None
 
-            encoder_hidden_states = encoder_hidden_states.view(-1, batch_size, 1, self.d_hidden)
-            encoder_hidden_states = encoder_hidden_states.repeat(1, 1, beam_size, 1)
-            encoder_hidden_states = encoder_hidden_states.view(src_seq_size, -1, self.d_hidden)
+            encoder_hidden_states = encoder_hidden_states.unsqueeze(1) # (batch_size, 1, seq_len, d_hidden)
+            encoder_hidden_states = encoder_hidden_states.repeat(1, beam_size, 1, 1) # (batch_size, beam_size, seq_len, d_hidden)
+            encoder_hidden_states = encoder_hidden_states.view(-1, src_seq_size, self.d_hidden) # (batch_size * beam_size, seq_len, d_hidden)
 
         # Scores save vector & decoding list setting
-        scores_save = torch.zeros(beam_size * batch_size, 1).to(device) # (batch_size * k, 1)
-        top_k_scores = torch.zeros(beam_size * batch_size, 1).to(device) # (batch_size * k, 1)
+        scores_save = torch.zeros(beam_size * batch_size, 1).to(device) # (batch_size * beam_size, 1)
+        top_k_scores = torch.zeros(beam_size * batch_size, 1).to(device) # (batch_size * beam_size, 1)
         complete_seqs = defaultdict(list)
         complete_ind = set()
 
         # Decoding start token setting
         seqs = torch.tensor([[self.decoder_start_token_id]], dtype=torch.long, device=device)
-        seqs = seqs.repeat(beam_size * batch_size, 1).contiguous() # (batch_size * k, 1)
+        seqs = seqs.repeat(beam_size * batch_size, 1).contiguous() # (batch_size * beam_size, 1)
 
         for step in range(self.src_max_len):
             # Decoding sentence

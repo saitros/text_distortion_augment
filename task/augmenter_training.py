@@ -461,7 +461,7 @@ def augmenter_training(args):
                 dict_key = prob_dict.keys()
 
                 write_log(logger, f'Generated Examples')
-                write_log(logger, f'Epsilon repeat: {args.args.epsilon_repeat}')
+                write_log(logger, f'Epsilon repeat: {args.epsilon_repeat}')
                 write_log(logger, f'Phase: {phase}')
                 write_log(logger, f'Source: {src_output}')
                 write_log(logger, f'Source Probability: {src_output_prob}')

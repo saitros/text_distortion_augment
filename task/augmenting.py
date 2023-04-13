@@ -22,7 +22,7 @@ from torch.cuda.amp import GradScaler, autocast
 from model.model import TransformerModel
 from model.dataset import CustomDataset
 from utils import TqdmLoggingHandler, write_log, return_model_name
-from task.utils import input_to_device, tokenizing
+from task.utils import input_to_device, tokenizing, data_load, data_sampling
 
 def augmenting(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -142,11 +142,11 @@ def augmenting(args):
 
             # Reconstruction
             latent_out = None
-            if args.encoder_out_mix_ratio != 0:
+            if model.latent_out_mix_ratio != 0:
                 latent_out = model.latent_encode(encoder_out=encoder_out)
 
             if args.test_decoding_strategy == 'greedy':
-                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
+                recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out).argmax(dim=2)
             elif args.test_decoding_strategy == 'beam':
                 recon_out = model.generate(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att, beam_size=args.beam_size,
                                            beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
@@ -155,6 +155,7 @@ def augmenting(args):
                                                   sampling_strategy=args.test_decoding_strategy, device=device,
                                                   topk=args.topk, topp=args.topp, softmax_temp=args.multinomial_temperature)
             decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
+            print(decoded_output)
 
         # Get classification probability for decoded_output
         classifier_out = model.classify(hidden_states=hidden_states)
@@ -166,7 +167,7 @@ def augmenting(args):
         hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
         classifier_out = model.classify(hidden_states=hidden_states_grad_true)
 
-        for _ in range(3):
+        for _ in range(args.epsilon_repeat):
 
             model.zero_grad()
             cls_loss = cls_criterion(classifier_out, fliped_trg_label)

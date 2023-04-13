@@ -58,8 +58,8 @@ if __name__=='__main__':
                         help='Validation split ratio; Default is 0.2')
     parser.add_argument('--min_len', default=4, type=int,
                         help="Sentences's minimum length; Default is 4")
-    parser.add_argument('--src_max_len', default=200, type=int,
-                        help="Sentences's minimum length; Default is 200")
+    parser.add_argument('--src_max_len', default=50, type=int,
+                        help="Sentences's minimum length; Default is 50")
     # Model setting
     parser.add_argument('--isPreTrain', default=True, type=str2bool,
                         help='Use pre-trained language model; Default is True')
@@ -69,12 +69,12 @@ if __name__=='__main__':
                         help='Augmentation model type; Default is BART')
     parser.add_argument('--classify_method', default='encoder_out', type=str, choices=['encoder_out', 'latent_out'],
                         help='Classification method; Default is encoder_out')
-    parser.add_argument('--encoder_out_mix_ratio', default=0.3, type=float,
-                        help='Encoder output ratio to input of decoder; Default is 0.3')
+    parser.add_argument('--encoder_out_mix_ratio', default=1, type=float,
+                        help='Encoder output ratio to input of decoder; Default is 1')
     parser.add_argument('--encoder_out_cross_attention', default=True, type=str2bool,
                         help='Use cross attention of decoder via encoder out; Default is True')
-    parser.add_argument('--encoder_out_to_augmenter', default=False, type=str2bool,
-                        help='Add decoder output and encoder output to augmenter; Default is False')
+    parser.add_argument('--encoder_out_to_augmenter', default=True, type=str2bool,
+                        help='Add decoder output and encoder output to augmenter; Default is True')
     parser.add_argument('--latent_out_to_augmenter', default=True, type=str2bool,
                         help='Add decoder output and latent output to augmenter; Default is True')
     parser.add_argument('--latent_mmd_loss', default=False, type=str2bool,
@@ -101,16 +101,14 @@ if __name__=='__main__':
     parser.add_argument('--lr_lambda', default=0.95, type=float,
                         help="Lambda learning scheduler's lambda; Default is 0.95")
     # Training setting
-    parser.add_argument('--aug_num_epochs', default=5, type=int,
+    parser.add_argument('--aug_num_epochs', default=10, type=int,
                         help='Augmenter training epochs; Default is 10')
-    parser.add_argument('--cls_num_epochs', default=3, type=int,
-                        help='Classifier training epochs; Default is 10')
+    parser.add_argument('--cls_num_epochs', default=5, type=int,
+                        help='Classifier training epochs; Default is 5')
     parser.add_argument('--num_workers', default=8, type=int,
                         help='Num CPU Workers; Default is 8')
     parser.add_argument('--batch_size', default=16, type=int,
                         help='Batch size; Default is 16')
-    parser.add_argument('--lr', default=5e-4, type=float,
-                        help='Maximum learning rate of warmup scheduler; Default is 5e-4')
     parser.add_argument('--w_decay', default=1e-5, type=float,
                         help="Ralamb's weight decay; Default is 1e-5")
     parser.add_argument('--clip_grad_norm', default=5, type=int,
@@ -122,7 +120,7 @@ if __name__=='__main__':
     parser.add_argument('--z_variation', default=2, type=float,
                         help='')
     # Testing setting
-    parser.add_argument('--grad_epsilon', default=0.001, type=float,
+    parser.add_argument('--grad_epsilon', default=0.1, type=float,
                         help='')
     parser.add_argument('--epsilon_repeat', default=3, type=int,
                         help='')
