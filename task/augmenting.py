@@ -106,12 +106,12 @@ def augmenting(args):
     aug_sent_dict = {
         'origin': list(),
         'recon': list(),
-        'fgsm': list()
+        'augment': list()
     }
     aug_prob_dict = {
         'origin': list(),
         'recon': list(),
-        'fgsm': list()
+        'augment': list()
     }
 
     for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
@@ -155,7 +155,6 @@ def augmenting(args):
                                                   sampling_strategy=args.test_decoding_strategy, device=device,
                                                   topk=args.topk, topp=args.topp, softmax_temp=args.multinomial_temperature)
             decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
-            print(decoded_output)
 
         # Get classification probability for decoded_output
         classifier_out = model.classify(hidden_states=hidden_states)
@@ -198,58 +197,24 @@ def augmenting(args):
             decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
 
             # Get classification probability for decoded_output
-            classifier_out_fgsm = model.classify(hidden_states=encoder_out_copy)
-        aug_sent_dict['fgsm'].extend(decoded_output)
-        aug_prob_dict['fgsm'].extend(F.softmax(classifier_out_fgsm, dim=1).to('cpu').numpy().tolist())
+            classifier_out_augment = model.classify(hidden_states=encoder_out_copy)
+        aug_sent_dict['augment'].extend(decoded_output)
+        aug_prob_dict['augment'].extend(F.softmax(classifier_out_augment, dim=1).to('cpu').numpy().tolist())
 
         if args.debuging_mode:
             print(aug_prob_dict)
             break
 
-    # POST-PROCESSING
-    processed_aug_seq = {}
-    processed_aug_seq['origin'] = {}
-    processed_aug_seq['recon'] = {}
-    processed_aug_seq['fgsm'] = {}
-
-    for phase in ['origin', 'recon', 'fgsm']:
-        encoded_dict = \
-            model.tokenizer(aug_sent_dict[phase],
-                            max_length=args.src_max_len,
-                            padding='max_length',
-                            truncation=True
-        )
-        processed_aug_seq[phase]['input_ids'] = encoded_dict['input_ids']
-        processed_aug_seq[phase]['attention_mask'] = encoded_dict['attention_mask']
-        if args.encoder_model_type == 'bert':
-            processed_aug_seq[phase]['token_type_ids'] = encoded_dict['token_type_ids']
-
-        if args.augmenting_label == 'soft':
-            processed_aug_seq[phase]['label'] = aug_prob_dict[phase]
-        elif args.augmenting_label == 'hard':
-            processed_aug_seq[phase]['label'] = np.argmax(np.array(aug_prob_dict[phase]), axis=1) # Need Check
-        else:
-            raise ValueError
-
-    # Save with h5py
+    # Save with csv
     save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
-
-    with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed_aug.hdf5'), 'w') as f:
-        # origin data
-        f.create_dataset('train_src_input_ids', data=processed_aug_seq['origin']['input_ids'])
-        f.create_dataset('train_src_attention_mask', data=processed_aug_seq['origin']['attention_mask'])
-        f.create_dataset('train_label', data=processed_aug_seq['origin']['label'])
-        # recon data
-        f.create_dataset('train_recon_src_input_ids', data=processed_aug_seq['recon']['input_ids'])
-        f.create_dataset('train_recon_src_attention_mask', data=processed_aug_seq['recon']['attention_mask'])
-        f.create_dataset('train_recon_label', data=processed_aug_seq['recon']['label'])
-        # fgsm data
-        f.create_dataset('train_fgsm_src_input_ids', data=processed_aug_seq['fgsm']['input_ids'])
-        f.create_dataset('train_fgsm_src_attention_mask', data=processed_aug_seq['fgsm']['attention_mask'])
-        f.create_dataset('train_fgsm_label', data=processed_aug_seq['fgsm']['label'])
-        if args.encoder_model_type == 'bert':
-            f.create_dataset('train_src_token_type_ids', data=processed_aug_seq['origin']['token_type_ids'])
-            f.create_dataset('train_recon_src_token_type_ids', data=processed_aug_seq['recon']['token_type_ids'])
-            f.create_dataset('train_fgsm_src_token_type_ids', data=processed_aug_seq['fgsm']['token_type_ids'])
-
-    print('Postprocessing Done!')
+    save_dat = pd.DataFrame(
+        {
+            'origin_sent': aug_sent_dict['origin'],
+            'origin_prob': aug_prob_dict['origin'],
+            'recon_sent': aug_sent_dict['recon'],
+            'recon_prob': aug_prob_dict['recon'],
+            'augment_sent': aug_sent_dict['augment'],
+            'augment_prob': aug_prob_dict['augment'],
+        }
+    )
+    save_dat.to_csv(os.path.join(save_path, 'aug_dat.csv'), index=False)
