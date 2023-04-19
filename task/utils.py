@@ -181,7 +181,7 @@ def tokenizing(args, src_list, tokenizer):
         for phase in ['train', 'valid', 'test']:
             encoded_dict = \
             tokenizer(
-                src_list[phase],
+                src_list[phase] if type(src_list[phase]) == list else src_list[phase].tolist(),
                 max_length=args.src_max_len,
                 padding='max_length',
                 truncation=True

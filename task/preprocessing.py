@@ -35,7 +35,7 @@ def preprocessing(args):
     write_log(logger, 'Start preprocessing!')
 
     src_list, trg_list = data_load(args)
-    src_list, trg_list = data_sampling(args)
+    src_list, trg_list = data_sampling(args, src_list, trg_list)
     write_log(logger, 'Data loading done! ; {0}min spend'.format(round((time.time()-start_time)/60, 3)))
 
     #===================================#

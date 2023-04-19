@@ -283,7 +283,7 @@ class TransformerModel(nn.Module):
 
         return predicted
 
-    def generate_sample(self, encoder_out, latent_out, attention_mask, sampling_strategy, device, topk=5, topp=0.9, softmax_temp=3.0):
+    def generate_sample(self, encoder_out, latent_out, attention_mask, sampling_strategy, device, topk=5, topp=0.9, midk=2, softmax_temp=3.0):
         # Input, output setting
         batch_size = encoder_out.size(0)
         src_seq_size = encoder_out.size(1)
@@ -314,20 +314,15 @@ class TransformerModel(nn.Module):
             )
             decoder_outputs = decoder_outputs['last_hidden_state']
 
-            if self.encoder_out_to_augmenter:
-                encoder_out_for_augmenter = encoder_out.sum(dim=1).unsqueeze(1) # (batch_size, 1, d_hidden)
-                encoder_out_for_augmenter = encoder_out_for_augmenter.repeat(1, decoder_outputs.size(1), 1) # (batch_size, seq_len, d_hidden)
-
-                decoder_outputs = torch.add(decoder_outputs, encoder_out_for_augmenter)
-
             # Next word probability
             scores = F.gelu(self.decoder_linear(decoder_outputs[:,-1])) # (batch_size, d_embedding)
             scores = self.decoder_augmenter(self.decoder_norm(scores)) # (batch_size, vocab_num)
-            
+
             # Avoid generating <pad> and <s> token and apply softmax temperature
             if step == 0:
-                scores[:, self.pad_idx] = float('-inf')
-                scores[:, self.bos_idx] = float('-inf')
+                scores[:, self.eos_idx] = float('-inf') # For first step, avoid generating <eos> token
+            scores[:, self.pad_idx] = float('-inf')
+            scores[:, self.bos_idx] = float('-inf')
             scores = scores / softmax_temp
             next_word_prob = F.softmax(scores, dim=1) # (batch_size, vocab_num)
 
@@ -339,18 +334,50 @@ class TransformerModel(nn.Module):
             elif sampling_strategy == 'topk':
                 # Get topk token
                 topk_prob, topk_idx = torch.topk(next_word_prob, topk, dim=-1) # (batch_size, topk)
-                topk_prob = topk_prob / torch.sum(topk_prob.sum(dim=-1, keepdim=True)) # (batch_size, topk) - normalize probability to sum 1
-                next_token_idx = torch.multinomial(topk_prob, 1).squeeze(1) # (batch_size) - sample token from topk token
+                norm_prob = topk_prob / torch.sum(topk_prob.sum(dim=-1, keepdim=True)) # (batch_size, topk) - normalize probability to sum 1
+                next_token_idx = torch.multinomial(norm_prob, 1).squeeze(1) # (batch_size) - sample token from topk token
                 next_word = topk_idx[torch.arange(topk_idx.size(0)), next_token_idx] # (batch_size)
             elif sampling_strategy == 'topp':
                 # Get topp token
                 sorted_prob, sorted_idx = torch.sort(next_word_prob, descending=True, dim=-1)
-                sorted_prob = sorted_prob.cumsum(dim=-1) # (batch_size, vocab_num)
-                sorted_idx = sorted_idx[sorted_prob <= topp] # (batch_size, vocab_num)
-                sorted_prob = sorted_prob[sorted_prob <= topp] # (batch_size, vocab_num)
-                sorted_prob = sorted_prob / torch.sum(sorted_prob.sum(dim=-1, keepdim=True)) # (batch_size, vocab_num) - normalize probability to sum 1
-                next_token_idx = torch.multinomial(sorted_prob, 1).squeeze(1) # (batch_size) - sample token from topp token
+                cumulative_prob = sorted_prob.cumsum(dim=-1) # (batch_size, vocab_num)
+
+                # Get index of first token whose cumulative probability is greater than topp
+                topp_mask = cumulative_prob > topp
+                # Apply mask to sorted index
+                topp_prob = sorted_prob.masked_fill(topp_mask, 0)
+
+                for _ in range(batch_size):
+                    if torch.sum(topp_prob[_]) == 0: # When top-1 is very probable so it already exceeds topp
+                        topp_prob[_, 0] = 1 # If all tokens are masked, set first token to 1 (=top-1 token)
+
+                norm_prob = topp_prob / torch.sum(topp_prob.sum(dim=-1, keepdim=True)) # (batch_size, vocab_num) - normalize probability to sum 1
+
+                next_token_idx = torch.multinomial(norm_prob, 1).squeeze(1) # (batch_size) - sample token from topp token
                 next_word = sorted_idx[torch.arange(sorted_idx.size(0)), next_token_idx] # (batch_size)
+            elif sampling_strategy == 'midk':
+                """
+                What is mid-k sampling?
+                mid-k sampling is a sampling strategy that samples from the middle k tokens of the sorted probability distribution.
+                First, select top-k tokens from the probability distribution. (For example, k = 10)
+                Then, exclude the mid-k tokens from the top-k tokens. (For example, k = 3)
+                In this case, we sample from the top 3~10 tokens exclude the most probable 3 tokens.
+                """
+
+                # Get topk token
+                topk_prob, topk_idx = torch.topk(next_word_prob, topk, dim=-1) # (batch_size, topk)
+                sorted_prob, sorted_idx = torch.sort(topk_prob, descending=True, dim=-1)
+                cumulative_prob = sorted_prob.cumsum(dim=-1) # (batch_size, topk)
+
+                for _ in range(batch_size):
+                    if cumulative_prob[_, midk] > topp: # mid-k token is already exceed topp -> they are very probable
+                        pass # Don't do mid-k sampling
+                    else: # word distribution is quite flat
+                        sorted_prob[_, :midk] = 0 # Set mid-k token to 0 (=exclude mid-k token)
+
+                norm_prob = sorted_prob / torch.sum(sorted_prob.sum(dim=-1, keepdim=True)) # (batch_size, topk) - normalize probability to sum 1
+                next_token_idx = torch.multinomial(norm_prob, 1).squeeze(1) # (batch_size) - sample token from topk token
+                next_word = topk_idx[torch.arange(topk_idx.size(0)), next_token_idx] # (batch_size)
             else:
                 raise ValueError('Sampling strategy is not defined')
 
@@ -361,77 +388,10 @@ class TransformerModel(nn.Module):
         # Postprocessing - remove generated tokens after <eos> token
         seqs = seqs.tolist()
         for i in range(batch_size):
-            if self.eos_idx in seqs[i]:
-                seqs[i] = seqs[i][:seqs[i].index(self.eos_idx) + 1] # remove generated tokens after <eos> token
+            if self.eos_idx in seqs[i][1:]:
+                seqs[i] = seqs[i][:seqs[i][1:].index(self.eos_idx) + 1] # remove generated tokens after <eos> token
             else:
                 pass # do nothing if <eos> token is not generated
-
-        return seqs
-
-    def generate_topk(self, encoder_out, latent_out, attention_mask, device, topk=5, softmax_temp=5.0):
-        # Input, output setting
-        batch_size = encoder_out.size(0)
-        src_seq_size = encoder_out.size(1)
-
-        # Total Hidden States
-        if self.encoder_out_cross_attention:
-            if self.latent_out_mix_ratio == 0:
-                encoder_hidden_states = encoder_out
-            elif self.encoder_out_ratio == 0:
-                encoder_hidden_states = latent_out
-            else:
-                encoder_hidden_states = torch.add((self.encoder_out_ratio * encoder_out), (self.latent_out_mix_ratio * latent_out.unsqueeze(1)))
-        else:
-            encoder_hidden_states = None
-            src_key_padding_mask = None
-
-        # Expanding
-        if self.encoder_out_cross_attention:
-            src_key_padding_mask = attention_mask.view(batch_size, 1, -1) # (batch_size, 1, src_seq_size)
-            src_key_padding_mask = src_key_padding_mask.view(-1, src_seq_size)
-
-            encoder_hidden_states = encoder_hidden_states.view(-1, batch_size, 1, self.d_hidden)
-            encoder_hidden_states = encoder_hidden_states.view(src_seq_size, -1, self.d_hidden)
-
-        # BART decoder start token
-        seqs = torch.tensor([[self.decoder_start_token_id]], dtype=torch.long, device=device) # (1, 1)
-        seqs = seqs.repeat(batch_size, 1) # (batch_size, 1) # <s> token
-        # Generate sentence
-        for step in range(self.src_max_len):
-            decoder_outputs = self.decoder(
-                input_ids=seqs,
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_attention_mask=attention_mask
-            )
-            decoder_outputs = decoder_outputs['last_hidden_state'] # (batch_size, seq_len, d_embedding)
-
-            # Score calculate
-            scores = F.gelu(self.decoder_linear(decoder_outputs)) # (batch_size, seq_len, d_embedding)
-            scores = self.decoder_augmenter(self.decoder_norm(scores)) # (batch_size, seq_len, vocab_num)
-            next_token_logits = scores[:, -1, :] # (batch_size, vocab_num)
-
-            # Avoid generating <pad> and <s> token
-            next_token_logits[:, self.pad_idx] = float('-inf')
-            next_token_logits[:, self.bos_idx] = float('-inf')
-
-            # Apply softmax temperature to logits
-            next_token_logits = next_token_logits / softmax_temp
-            next_token_prob = F.softmax(next_token_logits, dim=-1) # (batch_size, vocab_num)
-
-            # Get topk token
-            topk_prob, topk_idx = torch.topk(next_token_prob, topk, dim=-1) # (batch_size, topk)
-            topk_prob = topk_prob / torch.sum(topk_prob.sum(dim=-1, keepdim=True)) # (batch_size, topk) - normalize probability to sum 1
-            next_token_idx = torch.multinomial(topk_prob, 1).squeeze(1) # (batch_size) - sample token from topk token
-            next_token = topk_idx[torch.arange(topk_idx.size(0)), next_token_idx] # (batch_size)
-
-            # Concatenate generated token to sequence
-            next_token = next_token.unsqueeze(1) # (batch_size, 1)
-            seqs = torch.cat([seqs, next_token], dim=1) # (batch_size, seq_len + 1)
-
-            # If <eos> token is generated, stop generating
-            if self.eos_idx in next_token:
-                break
-
         return seqs
 
 def _prepare_bart_decoder_inputs(
