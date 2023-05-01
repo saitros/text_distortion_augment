@@ -3,7 +3,6 @@ import os
 import time
 import argparse
 # Import custom modules
-from task.preprocessing import preprocessing
 from task.augmenter_training import augmenter_training
 from task.augmenting import augmenting
 # from task.testing import testing
@@ -20,9 +19,6 @@ def main(args):
 
     # Path setting
     path_check(args)
-
-    if args.preprocessing:
-        preprocessing(args)
 
     if args.augmenter_training:
         augmenter_training(args)
