@@ -157,6 +157,16 @@ def data_sampling(args, src_list, trg_list):
 
     return src_list, trg_list
 
+def aug_data_load(args):
+
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
+    save_dat = pd.read_csv(os.path.join(save_path, f'aug_dat_{args.test_decoding_strategy}.csv'))
+
+    sample_indx = np.random.choice(data_len, sample_num, replace=False)
+    save_dat = save_dat.iloc[sample_indx]
+
+    return save_dat['augment_sent'].tolist(), save_dat['augment_sent'].tolist()
+
 def tokenizing(args, src_list, tokenizer):
     processed_sequences = dict()
     processed_sequences['train'] = dict()

@@ -45,53 +45,22 @@ def training(args):
     write_log(logger, 'Start training!')
 
     #===================================#
-    #============Data Load==============#
+    #=============Data Load=============#
     #===================================#
 
-    # 1) Data open
     write_log(logger, "Load data...")
-    gc.disable()
 
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
-
-    with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed.hdf5'), 'r') as f:
-        train_src_input_ids = f.get('train_src_input_ids')[:]
-        train_src_attention_mask = f.get('train_src_attention_mask')[:]
-        valid_src_input_ids = f.get('valid_src_input_ids')[:]
-        valid_src_attention_mask = f.get('valid_src_attention_mask')[:]
-        train_trg_list = f.get('train_label')[:]
-        train_trg_list = F.one_hot(torch.tensor(train_trg_list, dtype=torch.long)).numpy()
-        valid_trg_list = f.get('valid_label')[:]
-        valid_trg_list = F.one_hot(torch.tensor(valid_trg_list, dtype=torch.long)).numpy()
-        if args.encoder_model_type == 'bert':
-            train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
-            valid_src_token_type_ids = f.get('valid_src_token_type_ids')[:]
-        else:
-            train_src_token_type_ids = list()
-            valid_src_token_type_ids = list()
+    start_time = time()
+    total_src_list_, total_trg_list_ = data_load(args)
+    total_src_list, total_trg_list = data_sampling(args, total_src_list_, total_trg_list_)
 
     if args.train_with_aug:
-        with h5py.File(os.path.join(save_path, f'src_len_{args.src_max_len}_processed_aug.hdf5'), 'r') as f:
-            aug_train_src_input_ids = f.get('train_fgsm_src_input_ids')[:]
-            train_src_input_ids = np.concatenate((train_src_input_ids, aug_train_src_input_ids), axis=0)
-            aug_train_src_attention_mask = f.get('train_fgsm_src_attention_mask')[:]
-            train_src_attention_mask = np.concatenate((train_src_input_ids, aug_train_src_input_ids), axis=0)
-            aug_train_trg_list = f.get('train_fgsm_label')[:]
-            aug_train_trg_list = F.one_hot(torch.tensor(aug_train_trg_list, dtype=torch.long)).numpy()
-            train_trg_list = np.concatenate((train_trg_list, aug_train_trg_list), axis=0)
-            if args.encoder_model_type == 'bert':
-                aug_train_src_token_type_ids = f.get('train_src_token_type_ids')[:]
-                train_src_token_type_ids = np.concatenate((train_src_token_type_ids, aug_train_src_token_type_ids), axis=0)
+        aug_src_list, aug_trg_list = aug_data_load(args)
+        total_src_list['train'] = np.append(total_src_list['train'], aug_src_list)
+        total_trg_list['train'] = np.append(total_trg_list['train'], aug_trg_list)
 
-    with open(os.path.join(save_path, 'word2id.pkl'), 'rb') as f:
-        data_ = pickle.load(f)
-        src_word2id = data_['src_word2id']
-        src_vocab_num = len(src_word2id)
-        num_labels = data_['num_labels']
-        del data_
-
-    gc.enable()
-    write_log(logger, "Finished loading data!")
+    num_labels = len(set(total_trg_list['train']))
+    write_log(logger, 'Data loading done!')
 
     #===================================#
     #===========Train setting===========#
@@ -99,7 +68,7 @@ def training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model
+    model = AutoModel.from_pretrained()
     model.to(device)
 
     # 2) Dataloader setting

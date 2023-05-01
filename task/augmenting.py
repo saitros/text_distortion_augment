@@ -218,4 +218,4 @@ def augmenting(args):
             'augment_prob': aug_prob_dict['augment'],
         }
     )
-    save_dat.to_csv(os.path.join(save_path, f'aug_dat_{test_decoding_strategy}.csv'), index=False)
+    save_dat.to_csv(os.path.join(save_path, f'aug_dat_{args.test_decoding_strategy}.csv'), index=False)
