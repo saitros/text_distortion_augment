@@ -126,7 +126,7 @@ if __name__=='__main__':
                         help='')
     parser.add_argument('--test_batch_size', default=32, type=int,
                         help='Test batch size; Default is 32')
-    parser.add_argument('--test_decoding_strategy', default='beam', choices=['greedy', 'beam', 'multinomial', 'topk', 'topp'], type=str,
+    parser.add_argument('--test_decoding_strategy', default='beam', choices=['greedy', 'beam', 'multinomial', 'topk', 'topp', 'midk'], type=str,
                         help='Decoding strategy for test; Default is beam')
     parser.add_argument('--beam_size', default=5, type=int,
                         help='Beam search size; Default is 5')
@@ -138,8 +138,10 @@ if __name__=='__main__':
                         help='Topk sampling size; Default is 5')
     parser.add_argument('--topp', default=0.9, type=float,
                         help='Topk sampling size; Default is 0.9')
-    parser.add_argument('--multinomial_temperature', default=3.0, type=float,
-                        help='Multinomial sampling temperature; Default is 3.0')
+    parser.add_argument('--midk', default=2, type=int,
+                        help='Midk sampling size; Default is 2; Refer to model.py')
+    parser.add_argument('--multinomial_temperature', default=1.0, type=float,
+                        help='Multinomial sampling temperature; Default is 1.0')
     parser.add_argument('--augmenting_label', default='hard', type=str,
                         help='')
     # Seed & Logging setting

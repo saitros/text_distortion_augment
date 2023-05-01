@@ -67,7 +67,7 @@ def augmenting(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type, 
+    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type,
                              isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
                              encoder_out_cross_attention=args.encoder_out_cross_attention,
                              encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
@@ -77,7 +77,7 @@ def augmenting(args):
     # 2) Dataloader setting
     dataset_dict = {
         'train': CustomDataset(tokenizer=tokenizer,
-                               src_list=total_src_list['train'], src_list2=total_src_list['train2'], 
+                               src_list=total_src_list['train'], src_list2=total_src_list['train2'],
                                trg_list=total_trg_list['train'], src_max_len=args.src_max_len),
     }
     dataloader_dict = {
@@ -150,7 +150,7 @@ def augmenting(args):
             elif args.test_decoding_strategy == 'beam':
                 recon_out = model.generate(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att, beam_size=args.beam_size,
                                            beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
-            elif args.test_decoding_strategy in ['multinomial', 'topk', 'topp']:
+            elif args.test_decoding_strategy in ['multinomial', 'topk', 'topp', 'midk']:
                 recon_out = model.generate_sample(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att,
                                                   sampling_strategy=args.test_decoding_strategy, device=device,
                                                   topk=args.topk, topp=args.topp, softmax_temp=args.multinomial_temperature)
@@ -172,7 +172,7 @@ def augmenting(args):
             cls_loss = cls_criterion(classifier_out, fliped_trg_label)
             cls_loss.backward()
             hidden_states_grad = hidden_states_grad_true.grad.data.sign()
-            
+
             # Gradient-based Modification
             if args.classify_method == 'latent_out':
                 encoder_out_copy = encoder_out.clone().detach()
@@ -190,10 +190,10 @@ def augmenting(args):
             if args.test_decoding_strategy == 'beam':
                 recon_out = model.generate(encoder_out=encoder_out_copy, latent_out=latent_out_copy, attention_mask=src_att, beam_size=args.beam_size,
                                            beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
-            elif args.test_decoding_strategy in ['greedy', 'multinomial', 'topk', 'topp']:
+            elif args.test_decoding_strategy in ['greedy', 'multinomial', 'topk', 'topp', 'midk']:
                 recon_out = model.generate_sample(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att,
                                                   sampling_strategy=args.test_decoding_strategy, device=device,
-                                                  topk=args.topk, topp=args.topp, softmax_temp=args.multinomial_temperature)
+                                                  topk=args.topk, topp=args.topp, midk=args.midk, softmax_temp=args.multinomial_temperature)
             decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
 
             # Get classification probability for decoded_output
@@ -202,6 +202,7 @@ def augmenting(args):
         aug_prob_dict['augment'].extend(F.softmax(classifier_out_augment, dim=1).to('cpu').numpy().tolist())
 
         if args.debuging_mode:
+            print(aug_sent_dict)
             print(aug_prob_dict)
             break
 

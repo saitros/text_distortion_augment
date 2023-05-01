@@ -65,10 +65,10 @@ def augmenter_training(args):
 
     dataset_dict = {
         'train': CustomDataset(tokenizer=tokenizer,
-                               src_list=total_src_list['train'], src_list2=total_src_list['train2'], 
+                               src_list=total_src_list['train'], src_list2=total_src_list['train2'],
                                trg_list=total_trg_list['train'], src_max_len=args.src_max_len),
         'valid': CustomDataset(tokenizer=tokenizer,
-                               src_list=total_src_list['valid'], src_list2=total_src_list['valid2'], 
+                               src_list=total_src_list['valid'], src_list2=total_src_list['valid2'],
                                trg_list=total_trg_list['valid'], src_max_len=args.src_max_len)
     }
     dataloader_dict = {
@@ -87,7 +87,7 @@ def augmenter_training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type, 
+    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type,
                              isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
                              encoder_out_cross_attention=args.encoder_out_cross_attention,
                              encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
@@ -419,7 +419,7 @@ def augmenter_training(args):
                     cls_loss = cls_criterion(classifier_out, fliped_trg_label)
                     cls_loss.backward()
                     hidden_states_grad = hidden_states_grad_true.grad.data.sign()
-                    
+
                     # Gradient-based Modification
                     if args.classify_method == 'latent_out':
                         encoder_out_copy = encoder_out.clone().detach()
