@@ -166,56 +166,49 @@ def augmenting(args):
         hidden_states_grad_true = hidden_states.clone().detach().requires_grad_(True)
         classifier_out = model.classify(hidden_states=hidden_states_grad_true)
 
-        for _ in range(args.epsilon_repeat):
+        for _ in range(5):
+            for _ in range(args.epsilon_repeat):
 
-            model.zero_grad()
-            cls_loss = cls_criterion(classifier_out, fliped_trg_label)
-            cls_loss.backward()
-            hidden_states_grad = hidden_states_grad_true.grad.data.sign()
+                model.zero_grad()
+                cls_loss = cls_criterion(classifier_out, fliped_trg_label)
+                cls_loss.backward()
+                hidden_states_grad = hidden_states_grad_true.grad.data.sign()
 
-            # Gradient-based Modification
-            if args.classify_method == 'latent_out':
-                encoder_out_copy = encoder_out.clone().detach()
-                latent_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
-                hidden_states_grad_true = latent_out_copy.clone().detach().requires_grad_(True)
-            else:
-                encoder_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
-                latent_out_copy = None
-                hidden_states_grad_true = encoder_out_copy.clone().detach().requires_grad_(True)
+                # Gradient-based Modification
+                if args.classify_method == 'latent_out':
+                    encoder_out_copy = encoder_out.clone().detach()
+                    latent_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                    hidden_states_grad_true = latent_out_copy.clone().detach().requires_grad_(True)
+                else:
+                    encoder_out_copy = hidden_states_grad_true - (args.grad_epsilon * hidden_states_grad)
+                    latent_out_copy = None
+                    hidden_states_grad_true = encoder_out_copy.clone().detach().requires_grad_(True)
 
-            classifier_out = model.classify(hidden_states=hidden_states_grad_true)
+                classifier_out = model.classify(hidden_states=hidden_states_grad_true)
 
-        # FGSM - generate sentence
-        with torch.no_grad():
-            if args.test_decoding_strategy == 'beam':
-                recon_out = model.generate(encoder_out=encoder_out_copy, latent_out=latent_out_copy, attention_mask=src_att, beam_size=args.beam_size,
-                                           beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
-            elif args.test_decoding_strategy in ['greedy', 'multinomial', 'topk', 'topp', 'midk']:
-                recon_out = model.generate_sample(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att,
-                                                  sampling_strategy=args.test_decoding_strategy, device=device,
-                                                  topk=args.topk, topp=args.topp, midk=args.midk, softmax_temp=args.multinomial_temperature)
-            decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
+            # FGSM - generate sentence
+            with torch.no_grad():
+                if args.test_decoding_strategy == 'beam':
+                    recon_out = model.generate(encoder_out=encoder_out_copy, latent_out=latent_out_copy, attention_mask=src_att, beam_size=args.beam_size,
+                                            beam_alpha=args.beam_alpha, repetition_penalty=args.repetition_penalty, device=device)
+                elif args.test_decoding_strategy in ['greedy', 'multinomial', 'topk', 'topp', 'midk']:
+                    recon_out = model.generate_sample(encoder_out=encoder_out, latent_out=latent_out, attention_mask=src_att,
+                                                    sampling_strategy=args.test_decoding_strategy, device=device,
+                                                    topk=args.topk, topp=args.topp, midk=args.midk, softmax_temp=args.multinomial_temperature)
+                decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
 
-            # Get classification probability for decoded_output
-            classifier_out_augment = model.classify(hidden_states=encoder_out_copy)
-        aug_sent_dict['augment'].extend(decoded_output)
-        aug_prob_dict['augment'].extend(F.softmax(classifier_out_augment, dim=1).to('cpu').numpy().tolist())
+                # Get classification probability for decoded_output
+                classifier_out_augment = model.classify(hidden_states=encoder_out_copy)
+            aug_sent_dict['augment'].extend(decoded_output)
+            aug_prob_dict['augment'].extend(F.softmax(classifier_out_augment, dim=1).to('cpu').numpy().tolist())
 
         if args.debuging_mode:
             print(aug_sent_dict)
             print(aug_prob_dict)
             break
 
-    # Save with csv
+    # Save with hdf5
     save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
-    save_dat = pd.DataFrame(
-        {
-            'origin_sent': aug_sent_dict['origin'],
-            'origin_prob': aug_prob_dict['origin'],
-            'recon_sent': aug_sent_dict['recon'],
-            'recon_prob': aug_prob_dict['recon'],
-            'augment_sent': aug_sent_dict['augment'],
-            'augment_prob': aug_prob_dict['augment'],
-        }
-    )
-    save_dat.to_csv(os.path.join(save_path, f'aug_dat_{args.test_decoding_strategy}.csv'), index=False)
+    with h5py.File(os.path.join(save_path, f'aug_dat_{args.test_decoding_strategy}.hdf5'), 'w') as f:
+        f.create_dataset('augment_sent', data=aug_sent_dict['augment'])
+        f.create_dataset('augment_prob', data=aug_prob_dict['augment'])

@@ -115,6 +115,10 @@ if __name__=='__main__':
                         help='Dropout ratio; Default is 0.3')
     parser.add_argument('--z_variation', default=2, type=float,
                         help='')
+    parser.add_argument('--training_optimizer', default='AdamW', type=str, choices=optim_list,
+                        help="Choose optimizer setting in 'Ralamb', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
+    parser.add_argument('--training_scheduler', default='warmup', type=str, choices=scheduler_list,
+                        help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
     # Testing setting
     parser.add_argument('--grad_epsilon', default=0.1, type=float,
                         help='')

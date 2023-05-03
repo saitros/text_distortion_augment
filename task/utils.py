@@ -1,5 +1,6 @@
 import os
 import json
+import h5py
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
@@ -160,12 +161,14 @@ def data_sampling(args, src_list, trg_list):
 def aug_data_load(args):
 
     save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
-    save_dat = pd.read_csv(os.path.join(save_path, f'aug_dat_{args.test_decoding_strategy}.csv'))
 
-    sample_indx = np.random.choice(data_len, sample_num, replace=False)
-    save_dat = save_dat.iloc[sample_indx]
+    with h5py.File(os.path.join(save_path, f'aug_dat_{args.test_decoding_strategy}.hdf5'), 'r') as f:
+        augment_sent = f.get('augment_sent')[:]
+        augment_prob = f.get('augment_prob')[:]
 
-    return save_dat['augment_sent'].tolist(), save_dat['augment_sent'].tolist()
+    augment_sent = np.array([sent.decode('utf-8') for sent in augment_sent])
+
+    return augment_sent, augment_prob
 
 def tokenizing(args, src_list, tokenizer):
     processed_sequences = dict()
