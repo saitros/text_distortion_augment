@@ -188,10 +188,10 @@ def training(args):
 
         val_loss /= len(dataloader_dict['valid'])
         val_acc /= len(dataloader_dict['valid'])
-        write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
-        write_log(logger, 'Augmenter Validation MMD Loss: %3.3f' % val_mmd_loss)
+        write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_loss)
+        write_log(logger, 'Augmenter Validation Accuracy: %3.3f' % val_acc)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, f'cls_checkpoint_seed_{args.random_seed}.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, f'cls_training_checkpoint_seed_{args.random_seed}.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Checkpoint saving...')
             torch.save({
