@@ -171,7 +171,7 @@ def training(args):
 
         # Validation
         model.eval()
-
+        val_acc = 0
         val_loss = 0
         for batch_iter in tqdm(dataloader_dict['valid'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}'):
 
