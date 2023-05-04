@@ -26,7 +26,7 @@ from model.loss import compute_mmd, CustomLoss
 from optimizer.utils import shceduler_select, optimizer_select
 from optimizer.scheduler import get_cosine_schedule_with_warmup
 from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
-from task.utils import input_to_device, data_load, aug_data_load
+from task.utils import data_load, data_sampling, aug_data_load, tokenizing, input_to_device, encoder_parameter_grad
 
 def training(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -100,11 +100,11 @@ def training(args):
     write_log(logger, f"Total number of trainingsets iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
 
     # 3) Optimizer & Learning rate scheduler setting
-    optimizer = optimizer_select(optimizer_model=args.training_optimizer, model=model, lr=args.aug_lr)
-    scheduler = shceduler_select(scheduler_model=args.training_scheduler, optimizer=optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
+    optimizer = optimizer_select(optimizer_model=args.training_optimizer, model=model, lr=args.aug_lr, w_decay=args.w_decay)
+    scheduler = shceduler_select(phase='training', scheduler_model=args.training_scheduler, optimizer=optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
 
     cudnn.benchmark = True
-    cls_criterion = nn.CrossEntropyLoss(label_smoothing=args.training_label_smoothing_eps).to(device)
+    criterion = nn.CrossEntropyLoss(label_smoothing=args.training_label_smoothing_eps).to(device)
 
     # 3) Model resume
     start_epoch = 0
@@ -146,19 +146,22 @@ def training(args):
             #===================================#
 
             # Augmenter training
-            cls_ = model(input_ids=src_sequence, attention_mask=src_att)
+            logit = model(input_ids=src_sequence, attention_mask=src_att)['logits']
 
-            loss = criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
+            loss = criterion(logit, trg_label)
             loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(model.parameters(), args.clip_grad_norm)
             optimizer.step()
             scheduler.step()
 
+            # Accuracy
+            acc = sum((logit.argmax(dim=1) == trg_label.argmax(dim=1))) / len(trg_label)
+
             # Print loss value only training
             if i == 0 or i % args.print_freq == 0 or i == len(dataloader_dict['train'])-1:
                 iter_log = "[Epoch:%03d][%03d/%03d] train_loss:%03.2f | train_acc:%03.2f | learning_rate:%1.6f | spend_time:%02.2fmin" % \
-                    (epoch, i, len(dataloader_dict['train'])-1, loss.item(), acc.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                    (epoch, i, len(dataloader_dict['train'])-1, loss.item(), acc.item(), optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                 write_log(logger, iter_log)
 
         #===================================#
@@ -177,11 +180,11 @@ def training(args):
 
             with torch.no_grad():
                 # Augmenter training
-                cls_ = model(input_ids=src_sequence, attention_mask=src_att)
-                loss = criterion(decoder_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
+                logit = model(input_ids=src_sequence, attention_mask=src_att)['logits']
+                loss = criterion(logit, trg_label)
 
                 val_loss += loss
-                val_acc
+                val_acc += sum((logit.argmax(dim=1) == trg_label.argmax(dim=1))) / len(trg_label)
 
         val_loss /= len(dataloader_dict['valid'])
         val_acc /= len(dataloader_dict['valid'])

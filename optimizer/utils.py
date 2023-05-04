@@ -36,6 +36,8 @@ def shceduler_select(phase, scheduler_model, optimizer, dataloader_len, args):
         num_epochs = args.cls_num_epochs
     elif phase == 'aug':
         num_epochs = args.aug_num_epochs
+    elif phase == 'training':
+        num_epochs = args.training_num_epochs
 
     # Scheduler setting
     if scheduler_model == 'constant':

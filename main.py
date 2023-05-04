@@ -5,6 +5,7 @@ import argparse
 # Import custom modules
 from task.augmenter_training import augmenter_training
 from task.augmenting import augmenting
+from task.training import training
 # from task.testing import testing
 # Utils
 from utils import str2bool, path_check, set_random_seed
@@ -26,6 +27,9 @@ def main(args):
     if args.augmenting:
         augmenting(args)
 
+    if args.training:
+        training(args)
+
     # Time calculate
     print(f'Done! ; {round((time.time()-total_start_time)/60, 3)}min spend')
 
@@ -36,6 +40,7 @@ if __name__=='__main__':
     parser.add_argument('--preprocessing', action='store_true')
     parser.add_argument('--augmenter_training', action='store_true')
     parser.add_argument('--augmenting', action='store_true')
+    parser.add_argument('--training', action='store_true')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--debuging_mode', action='store_true')
     # Path setting
@@ -97,10 +102,13 @@ if __name__=='__main__':
     parser.add_argument('--lr_lambda', default=0.95, type=float,
                         help="Lambda learning scheduler's lambda; Default is 0.95")
     # Training setting
+    parser.add_argument('--train_with_aug', action='store_true')
     parser.add_argument('--aug_num_epochs', default=10, type=int,
                         help='Augmenter training epochs; Default is 10')
     parser.add_argument('--cls_num_epochs', default=5, type=int,
                         help='Classifier training epochs; Default is 5')
+    parser.add_argument('--training_num_epochs', default=10, type=int,
+                        help='Classifier training epochs; Default is 10')                 
     parser.add_argument('--num_workers', default=8, type=int,
                         help='Num CPU Workers; Default is 8')
     parser.add_argument('--batch_size', default=16, type=int,
@@ -119,6 +127,8 @@ if __name__=='__main__':
                         help="Choose optimizer setting in 'Ralamb', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--training_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
+    parser.add_argument('--training_label_smoothing_eps', default=0.01, type=float,
+                        help='')
     # Testing setting
     parser.add_argument('--grad_epsilon', default=0.1, type=float,
                         help='')
