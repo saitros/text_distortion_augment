@@ -126,6 +126,7 @@ def training(args):
 
     write_log(logger, 'Traing start!')
     best_val_loss = 1e+4
+    best_val_acc = 0
 
     for epoch in range(start_epoch + 1, args.aug_num_epochs + 1):
         start_time_e = time()
@@ -191,8 +192,8 @@ def training(args):
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_loss)
         write_log(logger, 'Augmenter Validation Accuracy: %3.3f' % val_acc)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.model_type, f'cls_training_checkpoint_seed_{args.random_seed}.pth.tar')
-        if val_recon_loss < best_aug_val_loss:
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, f'cls_training_checkpoint_seed_{args.random_seed}.pth.tar')
+        if val_loss < best_val_loss:
             write_log(logger, 'Checkpoint saving...')
             torch.save({
                 'epoch': epoch,
@@ -200,14 +201,14 @@ def training(args):
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict()
             }, save_file_name)
-            best_aug_val_loss = val_recon_loss
-            best_aug_epoch = epoch
+            best_val_loss = val_loss
+            best_val_acc = val_acc
+            best_epoch = epoch
         else:
-            else_log = f'Still {best_aug_epoch} epoch Loss({round(best_aug_val_loss.item(), 2)}) is better...'
+            else_log = f'Still {best_epoch} epoch Loss({round(best_val_loss.item(), 2)}) is better...'
             write_log(logger, else_log)
 
     # 3) Results
-    write_log(logger, f'Best AUG Epoch: {best_aug_epoch}')
-    write_log(logger, f'Best AUG Loss: {round(best_aug_val_loss.item(), 2)}')
-    write_log(logger, f'Best CLS Epoch: {best_cls_epoch}')
-    write_log(logger, f'Best CLS Loss: {round(best_cls_val_loss.item(), 2)}')
+    write_log(logger, f'Best Epoch: {best_epoch}')
+    write_log(logger, f'Best Loss: {round(best_val_loss.item(), 2)}')
+    write_log(logger, f'Best acc: {round(best_val_acc.item(), 2)}')
