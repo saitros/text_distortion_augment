@@ -113,4 +113,6 @@ def return_model_name(model_type):
         out = 'facebook/bart-large'
     if model_type == 'kr_bart':
         out = 'cosmoquester/bart-ko-mini'
+    if model_tyep == 't5':
+        out = 't5-base'
     return out
