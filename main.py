@@ -93,15 +93,17 @@ if __name__=='__main__':
                         help="Choose optimizer setting in 'Ralamb', 'Adam', 'SGD', 'Ralamb'; Default is Ralamb")
     parser.add_argument('--aug_scheduler', default='warmup', type=str, choices=scheduler_list,
                         help="Choose optimizer setting in 'constant', 'warmup', 'reduce'; Default is warmup")
-    parser.add_argument('--cls_lr', default=1e-5, type=float,
+    parser.add_argument('--cls_lr', default=5e-4, type=float,
                         help='Maximum learning rate of warmup scheduler; Default is 5e-4')
-    parser.add_argument('--aug_lr', default=5e-5, type=float,
+    parser.add_argument('--aug_lr', default=5e-4, type=float,
                         help='Maximum learning rate of warmup scheduler; Default is 5e-4')
     parser.add_argument('--n_warmup_epochs', default=2, type=float,
                         help='Wamrup epochs when using warmup scheduler; Default is 2')
     parser.add_argument('--lr_lambda', default=0.95, type=float,
                         help="Lambda learning scheduler's lambda; Default is 0.95")
     # Training setting
+    parser.add_argument('--cls_model_type', default='albert', type=str,
+                        help='Classification model type; Default is ALBERT')
     parser.add_argument('--train_with_aug', action='store_true')
     parser.add_argument('--aug_num_epochs', default=10, type=int,
                         help='Augmenter training epochs; Default is 10')
@@ -154,6 +156,10 @@ if __name__=='__main__':
                         help='Multinomial sampling temperature; Default is 1.0')
     parser.add_argument('--augmenting_label', default='hard', type=str,
                         help='')
+    # augmentation setting
+    parser.add_argument('--augmenting_target', default='both', type=str,
+                        help='it only works for rte whtch is the only dataset that has two targets')
+    
     # Seed & Logging setting
     parser.add_argument('--random_seed', default=42, type=int,
                         help='Random seed; Default is 42')
