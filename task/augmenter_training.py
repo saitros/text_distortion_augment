@@ -60,7 +60,7 @@ def augmenter_training(args):
     # One-hot encoding
     total_trg_list['train'] = F.one_hot(torch.tensor(total_trg_list['train'], dtype=torch.long)).numpy()
     total_trg_list['valid'] = F.one_hot(torch.tensor(total_trg_list['valid'], dtype=torch.long)).numpy()
-    total_trg_list['test'] = F.one_hot(torch.tensor(total_trg_list['test'], dtype=torch.long)).numpy()
+    # total_trg_list['test'] = F.one_hot(torch.tensor(total_trg_list['test'], dtype=torch.long)).numpy()
 
     # 2) Dataloader setting
     write_log(logger, "CustomDataset setting...")
