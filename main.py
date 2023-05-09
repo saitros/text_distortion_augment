@@ -6,6 +6,7 @@ import argparse
 from task.augmenter_training import augmenter_training
 from task.augmenting import augmenting
 from task.training import training
+from task.test_textattack import test_textattack
 # from task.testing import testing
 # Utils
 from utils import str2bool, path_check, set_random_seed
@@ -30,6 +31,9 @@ def main(args):
     if args.training:
         training(args)
 
+    if args.test_textattack:
+        test_textattack(args)
+
     # Time calculate
     print(f'Done! ; {round((time.time()-total_start_time)/60, 3)}min spend')
 
@@ -41,6 +45,7 @@ if __name__=='__main__':
     parser.add_argument('--augmenter_training', action='store_true')
     parser.add_argument('--augmenting', action='store_true')
     parser.add_argument('--training', action='store_true')
+    parser.add_argument('--test_textattack', action='store_true')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--debuging_mode', action='store_true')
     # Path setting
@@ -110,7 +115,7 @@ if __name__=='__main__':
     parser.add_argument('--cls_num_epochs', default=5, type=int,
                         help='Classifier training epochs; Default is 5')
     parser.add_argument('--training_num_epochs', default=10, type=int,
-                        help='Classifier training epochs; Default is 10')                 
+                        help='Classifier training epochs; Default is 10')
     parser.add_argument('--num_workers', default=8, type=int,
                         help='Num CPU Workers; Default is 8')
     parser.add_argument('--batch_size', default=16, type=int,

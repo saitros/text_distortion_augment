@@ -52,21 +52,18 @@ def training(args):
     write_log(logger, "Load data...")
 
     start_time = time()
-    total_src_list, total_trg_list = data_load(args)
-    # total_src_list, total_trg_list = data_sampling(args, total_src_list_, total_trg_list_)
+    total_src_list_, total_trg_list_ = data_load(args)
+    total_src_list, total_trg_list = data_sampling(args, total_src_list_, total_trg_list_)
     num_labels = len(set(total_trg_list['train']))
 
     # One-hot encoding
     total_trg_list['train'] = F.one_hot(torch.tensor(total_trg_list['train'], dtype=torch.long)).numpy()
     total_trg_list['valid'] = F.one_hot(torch.tensor(total_trg_list['valid'], dtype=torch.long)).numpy()
-    
-    # if test label is negative, change to 0
-    # '<' not supported between instances of 'list' and 'int'
-    total_trg_list['test'] = [0 if x < 0 else x for x in total_trg_list['test']]
-    total_trg_list['test'] = F.one_hot(torch.tensor(total_trg_list['test'], dtype=torch.long)).numpy()
-        
-    # huggingface test label dosent have answer.
-    # total_trg_list['test'] = F.one_hot(torch.tensor(total_trg_list['test'], dtype=torch.long)).numpy()
+    if args.data_name == 'IMDB':
+        total_trg_list['test'] = F.one_hot(torch.tensor(total_trg_list['test'], dtype=torch.long)).numpy()
+    else:
+        total_trg_list['test'] = total_trg_list['valid']
+        total_src_list['test'] = total_src_list['valid']
 
     if args.train_with_aug:
         aug_src_list, aug_trg_list = aug_data_load(args)
@@ -80,18 +77,13 @@ def training(args):
     #===================================#
 
     # 1) Model initiating
-    model_name = args.encoder_model_type
-    if model_name == 'albert':
-        model_name = 'albert-xxlarge-v2'
-    
     write_log(logger, 'Instantiating model...')
-    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels)
+    model = AutoModelForSequenceClassification.from_pretrained("bert-base-cased", num_labels=num_labels)
     model.to(device)
 
     # 2) Dataloader setting
-
-    
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    # tokenizer_name = return_model_name(args.encoder_model_type)
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
     src_vocab_num = tokenizer.vocab_size
 
     dataset_dict = {
@@ -99,11 +91,8 @@ def training(args):
                                src_list=total_src_list['train'], src_list2=total_src_list['train2'],
                                trg_list=total_trg_list['train'], src_max_len=args.src_max_len),
         'valid': CustomDataset(tokenizer=tokenizer,
-                               src_list=total_src_list['valid'], src_list2=total_src_list['valid2'],
-                               trg_list=total_trg_list['valid'], src_max_len=args.src_max_len),
-        'test': CustomDataset(tokenizer=tokenizer,
-                              src_list=total_src_list['test'], src_list2=total_src_list['test2'],
-                              trg_list=total_trg_list['test'], src_max_len=args.src_max_len)
+                               src_list=total_src_list['test'], src_list2=total_src_list['test2'],
+                               trg_list=total_trg_list['test'], src_max_len=args.src_max_len)
     }
     dataloader_dict = {
         'train': DataLoader(dataset_dict['train'], drop_last=True,
