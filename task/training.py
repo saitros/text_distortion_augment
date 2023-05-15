@@ -26,8 +26,8 @@ from model.dataset import CustomDataset
 from model.loss import compute_mmd, CustomLoss
 from optimizer.utils import shceduler_select, optimizer_select
 from optimizer.scheduler import get_cosine_schedule_with_warmup
-from utils import TqdmLoggingHandler, write_log, get_tb_exp_name
-from task.utils import data_load, data_sampling, aug_data_load, tokenizing, input_to_device, encoder_parameter_grad
+from utils import TqdmLoggingHandler, write_log, get_tb_exp_name, return_model_name
+from task.utils import data_load, data_sampling, aug_data_load, tokenizing, input_to_device, encoder_parameter_grad, result_writing
 
 def training(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -59,11 +59,11 @@ def training(args):
     # One-hot encoding
     total_trg_list['train'] = F.one_hot(torch.tensor(total_trg_list['train'], dtype=torch.long)).numpy()
     total_trg_list['valid'] = F.one_hot(torch.tensor(total_trg_list['valid'], dtype=torch.long)).numpy()
-    if args.data_name == 'IMDB':
-        total_trg_list['test'] = F.one_hot(torch.tensor(total_trg_list['test'], dtype=torch.long)).numpy()
-    else:
-        total_trg_list['test'] = total_trg_list['valid']
+    if args.data_name == 'sst2':
         total_src_list['test'] = total_src_list['valid']
+        total_trg_list['test'] = total_trg_list['valid']
+    else:
+        total_trg_list['test'] = F.one_hot(torch.tensor(total_trg_list['test'], dtype=torch.long)).numpy()
 
     if args.train_with_aug:
         aug_src_list, aug_trg_list = aug_data_load(args)
@@ -78,12 +78,13 @@ def training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = AutoModelForSequenceClassification.from_pretrained("bert-base-cased", num_labels=num_labels)
+    model_name = return_model_name(args.cls_model_type)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels)
     model.to(device)
 
     # 2) Dataloader setting
-    # tokenizer_name = return_model_name(args.encoder_model_type)
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
+    tokenizer_name = return_model_name(args.cls_model_type)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     src_vocab_num = tokenizer.vocab_size
 
     dataset_dict = {
@@ -91,6 +92,9 @@ def training(args):
                                src_list=total_src_list['train'], src_list2=total_src_list['train2'],
                                trg_list=total_trg_list['train'], src_max_len=args.src_max_len),
         'valid': CustomDataset(tokenizer=tokenizer,
+                               src_list=total_src_list['valid'], src_list2=total_src_list['valid2'],
+                               trg_list=total_trg_list['valid'], src_max_len=args.src_max_len),
+        'test': CustomDataset(tokenizer=tokenizer,
                                src_list=total_src_list['test'], src_list2=total_src_list['test2'],
                                trg_list=total_trg_list['test'], src_max_len=args.src_max_len)
     }
@@ -99,20 +103,20 @@ def training(args):
                             batch_size=args.batch_size, shuffle=True,
                             pin_memory=True, num_workers=args.num_workers),
         'valid': DataLoader(dataset_dict['valid'], drop_last=False,
-                            batch_size=args.batch_size, shuffle=True, pin_memory=True,
-                            num_workers=args.num_workers),
+                            batch_size=args.batch_size, shuffle=True, 
+                            pin_memory=True, num_workers=args.num_workers),
         'test': DataLoader(dataset_dict['test'], drop_last=False,
-                           batch_size=args.batch_size, shuffle=False, pin_memory=True,
-                           num_workers=args.num_workers)
+                           batch_size=args.batch_size, shuffle=False, 
+                           pin_memory=True, num_workers=args.num_workers)
     }
     write_log(logger, f"Total number of trainingsets iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
 
     # 3) Optimizer & Learning rate scheduler setting
-    optimizer = optimizer_select(optimizer_model=args.training_optimizer, model=model, lr=args.aug_lr, w_decay=args.w_decay)
-    scheduler = shceduler_select(phase='training', scheduler_model=args.training_scheduler, optimizer=optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
+    optimizer = optimizer_select(optimizer_model=args.cls_optimizer, model=model, lr=args.cls_lr, w_decay=args.w_decay)
+    scheduler = shceduler_select(phase='training', scheduler_model=args.cls_scheduler, optimizer=optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
 
     cudnn.benchmark = True
-    criterion = nn.CrossEntropyLoss(label_smoothing=args.training_label_smoothing_eps).to(device)
+    criterion = nn.CrossEntropyLoss(label_smoothing=args.cls_label_smoothing_eps).to(device)
 
     # 3) Model resume
     start_epoch = 0
@@ -136,7 +140,7 @@ def training(args):
     best_val_loss = 1e+4
     best_val_acc = 0
 
-    for epoch in range(start_epoch + 1, args.aug_num_epochs + 1):
+    for epoch in range(start_epoch + 1, args.training_num_epochs + 1):
         start_time_e = time()
 
         write_log(logger, 'Training start...')
@@ -200,7 +204,7 @@ def training(args):
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_loss)
         write_log(logger, 'Augmenter Validation Accuracy: %3.3f' % val_acc)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type , f'cls_training_checkpoint_seed_{args.random_seed}.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.aug_encoder_model_type , f'cls_training_checkpoint_seed_{args.random_seed}.pth.tar')
         if val_loss < best_val_loss:
             write_log(logger, 'Checkpoint saving...')
             torch.save({
@@ -223,7 +227,7 @@ def training(args):
 
     # Generate predictions for the test set
     model.eval()
-    prediction_strings = []
+    prediction_list = []
     
     for batch_iter in tqdm(dataloader_dict['test'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}'):
         b_iter = input_to_device(batch_iter, device=device)
@@ -234,24 +238,27 @@ def training(args):
             logit = model(input_ids=src_sequence, attention_mask=src_att)['logits']
 
             predictions = logit.argmax(dim=1)
+            prediction_list.extend(predictions.detach().cpu().tolist())
             
             # Convert predictions to a list of strings
-            for prediction in predictions:
-                if prediction == 0:
-                    prediction_strings.append('entailment')
-                else:
-                    prediction_strings.append('not_entailment')
+            # for prediction in predictions:
+            #     if prediction == 0:
+            #         prediction_strings.append('entailment')
+            #     else:
+            #         prediction_strings.append('not_entailment')
     
     # Write predictions to a tsv file with index, prediction string header
-    save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type , f'{args.data_name}.tsv')
+    save_file_name = os.path.join(args.result_path, args.data_name, f'{args.random_seed}.tsv')
     with open(save_file_name, 'wt') as f:
         f.write('index\tprediction\n')
-        for idx, prediction in enumerate(prediction_strings):
+        for idx, prediction in enumerate(prediction_list):
             f.write(f'{idx}\t{prediction}\n')
 
     write_log(logger, f'Test predictions saved --> {save_file_name}')        
 
     # 3) Results
+    result_writing(args, best_val_acc, best_val_loss)
+
     write_log(logger, f'Best Epoch: {best_epoch}')
     write_log(logger, f'Best Loss: {round(best_val_loss.item(), 2)}')
     write_log(logger, f'Best acc: {round(best_val_acc.item(), 2)}')

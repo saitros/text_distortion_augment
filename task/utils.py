@@ -82,6 +82,26 @@ def data_load(args):
         src_list['test2'] = None
         trg_list['test'] = np.array(test_dat['label'])
 
+    if args.data_name == 'ag_news':
+        dataset = load_dataset("ag_news")
+
+        train_dat = dataset['train']
+        test_dat = dataset['test']
+
+        train_index, valid_index, test_index = data_split_index(train_dat, valid_ratio=args.valid_ratio, test_ratio=0)
+
+        src_list['train'] = np.array(train_dat['text'])[train_index]
+        src_list['train2'] = None
+        trg_list['train'] = np.array(train_dat['label'])[train_index]
+
+        src_list['valid'] = np.array(train_dat['text'])[valid_index]
+        src_list['valid2'] = None
+        trg_list['valid'] = np.array(train_dat['label'])[valid_index]
+
+        src_list['test'] = test_dat['text']
+        src_list['test2'] = None
+        trg_list['test'] = test_dat['label']
+
     if args.data_name == 'mnli':
         dataset = load_dataset("glue", args.data_name)
         train_dat = pd.DataFrame(dataset['train'])
@@ -178,7 +198,7 @@ def data_sampling(args, src_list, trg_list):
 
 def aug_data_load(args):
 
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.aug_encoder_model_type)
 
     with h5py.File(os.path.join(save_path, f'aug_dat_{args.test_decoding_strategy}.hdf5'), 'r') as f:
         augment_sent = f.get('augment_sent')[:]
@@ -255,3 +275,38 @@ def encoder_parameter_grad(model, on: bool = True):
         para.requires_grad = on
 
     return model
+
+def result_writing(args, accuracy, loss):
+    fname = os.path.join(args.result_path, args.data_name, 'results.csv')
+    
+    # CSV file Making
+    if not os.path.isfile(fname):
+        result_dat = pd.DataFrame({
+            'seed': [],
+            'sampling_ratio': [],
+            'aug_encoder_model_type': [],
+            'aug_decoder_model_type': [],
+            'train_with_aug': [],
+            'cls_model_type': [],
+            'test_decoding_strategy': [],
+            'augmenting_label': [],
+            'Accuracy': [],
+            'Loss': []
+        })
+        result_dat.to_csv(fname, index=False)
+    
+    result_dat = pd.read_csv(fname)
+    result = {
+        'seed': args.random_seed,
+        'sampling_ratio': args.sampling_ratio,
+        'aug_encoder_model_type': args.aug_encoder_model_type,
+        'aug_decoder_model_type': args.aug_decoder_model_type,
+        'train_with_aug': args.train_with_aug,
+        'cls_model_type': args.cls_model_type,
+        'test_decoding_strategy': args.test_decoding_strategy,
+        'augmenting_label': args.augmenting_label,
+        'Accuracy': accuracy.item(),
+        'Loss': loss.item()
+    }
+    result_dat = result_dat.append(result, ignore_index=True)
+    result_dat.to_csv(fname, index=False)

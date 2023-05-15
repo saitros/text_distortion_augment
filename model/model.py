@@ -123,9 +123,12 @@ class TransformerModel(nn.Module):
 
     def forward(self, input_ids, attention_mask, encoder_out, latent_out=None):
 
-        decoder_input_ids = shift_tokens_right(
-            input_ids, self.pad_idx, self.decoder_start_token_id
-        )
+        if self.decoder_model_type == 'bart':
+            decoder_input_ids = shift_tokens_right(
+                input_ids, self.pad_idx, self.decoder_start_token_id
+            )
+        else:
+            decoder_input_ids = input_ids
 
         if self.encoder_out_cross_attention:
             if self.latent_out_mix_ratio == 0:
@@ -322,7 +325,8 @@ class TransformerModel(nn.Module):
             if step == 0:
                 scores[:, self.eos_idx] = float('-inf') # For first step, avoid generating <eos> token
             scores[:, self.pad_idx] = float('-inf')
-            scores[:, self.bos_idx] = float('-inf')
+            if self.decoder_model_type == 'bart':
+                scores[:, self.bos_idx] = float('-inf')
             scores = scores / softmax_temp
             next_word_prob = F.softmax(scores, dim=1) # (batch_size, vocab_num)
 
@@ -330,6 +334,7 @@ class TransformerModel(nn.Module):
             if sampling_strategy == 'greedy':
                 next_word = torch.argmax(next_word_prob, dim=-1)
             elif sampling_strategy == 'multinomial':
+                # print(next_word_prob)
                 next_word = torch.multinomial(next_word_prob, 1).squeeze(1) # (batch_size)
             elif sampling_strategy == 'topk':
                 # Get topk token

@@ -48,13 +48,13 @@ def augmenting(args):
 
     start_time = time()
     total_src_list, total_trg_list = data_load(args)
-    # total_src_list, total_trg_list = data_sampling(args, total_src_list, total_trg_list)
+    total_src_list, total_trg_list = data_sampling(args, total_src_list, total_trg_list)
     num_labels = len(set(total_trg_list['train']))
     write_log(logger, 'Data loading done!')
 
     # 2) Dataloader setting
     write_log(logger, "CustomDataset setting...")
-    tokenizer_name = return_model_name(args.encoder_model_type)
+    tokenizer_name = return_model_name(args.aug_encoder_model_type)
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     src_vocab_num = tokenizer.vocab_size
 
@@ -67,7 +67,7 @@ def augmenting(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type,
+    model = TransformerModel(encoder_model_type=args.aug_encoder_model_type, decoder_model_type=args.aug_decoder_model_type,
                              isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
                              encoder_out_cross_attention=args.encoder_out_cross_attention,
                              encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
@@ -120,7 +120,7 @@ def augmenting(args):
     # 3) Model loading
     cudnn.benchmark = True
     cls_criterion = nn.CrossEntropyLoss().to(device)
-    save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
+    save_file_name = os.path.join(args.model_save_path, args.data_name, args.aug_encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
     checkpoint = torch.load(save_file_name)
     model.load_state_dict(checkpoint['model'])
     write_log(logger, f'Loaded augmenter model from {save_file_name}')
@@ -258,7 +258,7 @@ def augmenting(args):
             break
 
     # Save with hdf5
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.aug_encoder_model_type)
     with h5py.File(os.path.join(save_path, f'aug_dat_{args.test_decoding_strategy}.hdf5'), 'w') as f:
         f.create_dataset('augment_sent', data=aug_sent_dict['augment'])
         f.create_dataset('augment_prob', data=aug_prob_dict['augment'])

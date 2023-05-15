@@ -33,9 +33,9 @@ def optimizer_select(optimizer_model, model, lr, w_decay):
 def shceduler_select(phase, scheduler_model, optimizer, dataloader_len, args):
 
     if phase == 'cls':
-        num_epochs = args.cls_num_epochs
+        num_epochs = args.aug_cls_num_epochs
     elif phase == 'aug':
-        num_epochs = args.aug_num_epochs
+        num_epochs = args.aug_recon_num_epochs
     elif phase == 'training':
         num_epochs = args.training_num_epochs
 
