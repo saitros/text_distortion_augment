@@ -4,7 +4,10 @@ import time
 import argparse
 # Import custom modules
 from task.augmenter_training import augmenter_training
+from task.text_style_transfer import style_transfer_training
+from task.text_style_augmenting import style_transfer_augmenting
 from task.augmenting import augmenting
+from experiment.bart_method import experiment_bart
 # from task.testing import testing
 # Utils
 from utils import str2bool, path_check, set_random_seed
@@ -23,8 +26,17 @@ def main(args):
     if args.augmenter_training:
         augmenter_training(args)
 
+    if args.style_transfer:
+        style_transfer_training(args)
+
+    if args.style_transfer_augmenting:
+        style_transfer_augmenting(args)
+
     if args.augmenting:
         augmenting(args)
+
+    if args.experiment_bart:
+        experiment_bart(args)
 
     # Time calculate
     print(f'Done! ; {round((time.time()-total_start_time)/60, 3)}min spend')
@@ -36,6 +48,9 @@ if __name__=='__main__':
     parser.add_argument('--preprocessing', action='store_true')
     parser.add_argument('--augmenter_training', action='store_true')
     parser.add_argument('--augmenting', action='store_true')
+    parser.add_argument('--style_transfer', action='store_true')
+    parser.add_argument('--experiment_bart', action='store_true')
+    parser.add_argument('--style_transfer_augmenting', action='store_true')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--debuging_mode', action='store_true')
     # Path setting
@@ -55,7 +70,7 @@ if __name__=='__main__':
     parser.add_argument('--min_len', default=4, type=int,
                         help="Sentences's minimum length; Default is 4")
     parser.add_argument('--src_max_len', default=50, type=int,
-                        help="Sentences's minimum length; Default is 50")
+                        help="Sentences's maximum length; Default is 50")
     # Model setting
     parser.add_argument('--isPreTrain', default=True, type=str2bool,
                         help='Use pre-trained language model; Default is True')
@@ -151,7 +166,7 @@ if __name__=='__main__':
                         help='Print training process frequency; Default is 300')
     parser.add_argument('--print_example', default=True, type=str2bool,
                         help='Print augmented example; Default is True')
-    parser.add_argument('--sampling_ratio', default=0.2, type=float,
+    parser.add_argument('--sampling_ratio', default=0.1, type=float,
                         help='')
     args = parser.parse_args()
 
