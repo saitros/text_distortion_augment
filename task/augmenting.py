@@ -54,7 +54,7 @@ def augmenting(args):
 
     # 2) Dataloader setting
     write_log(logger, "CustomDataset setting...")
-    tokenizer_name = return_model_name(args.encoder_model_type)
+    tokenizer_name = return_model_name(args.aug_encoder_model_type)
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     src_vocab_num = tokenizer.vocab_size
 
@@ -67,7 +67,7 @@ def augmenting(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type,
+    model = TransformerModel(encoder_model_type=args.aug_encoder_model_type, decoder_model_type=args.aug_decoder_model_type,
                              isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
                              encoder_out_cross_attention=args.encoder_out_cross_attention,
                              encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
@@ -75,22 +75,52 @@ def augmenting(args):
     model.to(device)
 
     # 2) Dataloader setting
-    dataset_dict = {
-        'train': CustomDataset(tokenizer=tokenizer,
-                               src_list=total_src_list['train'], src_list2=total_src_list['train2'],
-                               trg_list=total_trg_list['train'], src_max_len=args.src_max_len),
-    }
-    dataloader_dict = {
-        'train': DataLoader(dataset_dict['train'], drop_last=True,
-                            batch_size=args.batch_size, shuffle=True,
-                            pin_memory=True, num_workers=args.num_workers)
-    }
+    
+    # rte dataset has premise and hypothesis
+    # augmneting for rte dataset will be conducted only for either sentence1 or sentence2.
+    # In the future, it will be merged again with data that has not been augmented.
+    if args.data_name == 'rte' and args.augmenting_target == 'sentence1':
+        dataset_dict = {
+            'train': CustomDataset(tokenizer=tokenizer,
+                                src_list=total_src_list['train'], src_list2=None,
+                                trg_list=total_trg_list['train'], src_max_len=args.src_max_len),
+        }
+        dataloader_dict = {
+            'train': DataLoader(dataset_dict['train'], drop_last=True,
+                                batch_size=args.batch_size, shuffle=False,
+                                pin_memory=True, num_workers=args.num_workers)
+        }
+        
+        
+    if args.data_name == 'rte' and args.augmenting_target == 'sentence2':
+        dataset_dict = {
+            'train': CustomDataset(tokenizer=tokenizer,
+                                src_list=total_src_list['train2'], src_list2=None,
+                                trg_list=total_trg_list['train'], src_max_len=args.src_max_len),
+        }
+        dataloader_dict = {
+            'train': DataLoader(dataset_dict['train'], drop_last=True,
+                                batch_size=args.batch_size, shuffle=False,
+                                pin_memory=True, num_workers=args.num_workers)
+        }
+   
+    if args.augmenting_target == 'both':
+        dataset_dict = {
+            'train': CustomDataset(tokenizer=tokenizer,
+                                src_list=total_src_list['train'], src_list2=total_src_list['train2'],
+                                trg_list=total_trg_list['train'], src_max_len=args.src_max_len),
+        }
+        dataloader_dict = {
+            'train': DataLoader(dataset_dict['train'], drop_last=True,
+                                batch_size=args.batch_size, shuffle=True,
+                                pin_memory=True, num_workers=args.num_workers)
+        }
     write_log(logger, f"Total number of trainingsets iterations - {len(dataset_dict['train'])}, {len(dataloader_dict['train'])}")
 
     # 3) Model loading
     cudnn.benchmark = True
     cls_criterion = nn.CrossEntropyLoss().to(device)
-    save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
+    save_file_name = os.path.join(args.model_save_path, args.data_name, args.aug_encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
     checkpoint = torch.load(save_file_name)
     model.load_state_dict(checkpoint['model'])
     write_log(logger, f'Loaded augmenter model from {save_file_name}')
@@ -155,7 +185,16 @@ def augmenting(args):
                                                   sampling_strategy=args.test_decoding_strategy, device=device,
                                                   topk=args.topk, topp=args.topp, softmax_temp=args.multinomial_temperature)
             decoded_output = model.tokenizer.batch_decode(recon_out, skip_special_tokens=True)
-
+            
+            if args.augmenting_target == 'sentence1':
+                # concat with sentence2 from total_src_list['train2']
+                decoded_output = [decoded_output[i] + ' ' + total_src_list['train2'][i] for i in range(len(decoded_output))]
+                
+            if args.augmenting_target == 'sentence2':
+                # concat with sentence1 from total_src_list['train']
+                decoded_output = [total_src_list['train'][i] + ' ' + decoded_output[i] for i in range(len(decoded_output))]
+                
+                
         # Get classification probability for decoded_output
         classifier_out = model.classify(hidden_states=hidden_states)
 
@@ -170,6 +209,9 @@ def augmenting(args):
             for _ in range(args.epsilon_repeat):
 
                 model.zero_grad()
+                # print('type(classifier_out)', type(classifier_out))
+                # print('type(fliped_trg_label)', type(fliped_trg_label))
+                fliped_trg_label = fliped_trg_label.long()
                 cls_loss = cls_criterion(classifier_out, fliped_trg_label)
                 cls_loss.backward()
                 hidden_states_grad = hidden_states_grad_true.grad.data.sign()
@@ -199,6 +241,14 @@ def augmenting(args):
 
                 # Get classification probability for decoded_output
                 classifier_out_augment = model.classify(hidden_states=encoder_out_copy)
+                
+            if args.augmenting_target == 'sentence1':
+                decoded_output = [decoded_output[i] + ' ' + total_src_list['train2'][i] for i in range(len(decoded_output))]
+                
+            if args.augmenting_target == 'sentence2':
+                decoded_output = [total_src_list['train'][i] + ' ' + decoded_output[i] for i in range(len(decoded_output))]
+            
+            
             aug_sent_dict['augment'].extend(decoded_output)
             aug_prob_dict['augment'].extend(F.softmax(classifier_out_augment, dim=1).to('cpu').numpy().tolist())
 
@@ -208,7 +258,7 @@ def augmenting(args):
             break
 
     # Save with hdf5
-    save_path = os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)
+    save_path = os.path.join(args.preprocess_path, args.data_name, args.aug_encoder_model_type)
     with h5py.File(os.path.join(save_path, f'aug_dat_{args.test_decoding_strategy}.hdf5'), 'w') as f:
         f.create_dataset('augment_sent', data=aug_sent_dict['augment'])
         f.create_dataset('augment_prob', data=aug_prob_dict['augment'])

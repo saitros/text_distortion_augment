@@ -57,11 +57,24 @@ def augmenter_training(args):
     num_labels = len(set(total_trg_list['train']))
     write_log(logger, 'Data loading done!')
 
+    # One-hot encoding
+    total_trg_list['train'] = F.one_hot(torch.tensor(total_trg_list['train'], dtype=torch.long)).numpy()
+    total_trg_list['valid'] = F.one_hot(torch.tensor(total_trg_list['valid'], dtype=torch.long)).numpy()
+
     # 2) Dataloader setting
     write_log(logger, "CustomDataset setting...")
-    tokenizer_name = return_model_name(args.encoder_model_type)
+    tokenizer_name = return_model_name(args.aug_encoder_model_type)
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     src_vocab_num = tokenizer.vocab_size
+
+    # bart with rte dataset could concat premise and hypothesis (i.e. sentence1 and sentence2)
+    # with '</s></s>' for augmentation
+    
+    # if args.aug_encoder_model_type == 'bart' & args.data_name == 'rte':
+    #     for i in range(len(total_src_list['train'])):
+    #         total_src_list['train'][i] = total_src_list['train'][i] + '</s></s>' + total_src_list['train2'][i]
+    #     for i in range(len(total_src_list['valid'])):
+    #         total_src_list['valid'][i] = total_src_list['valid'][i] + '</s></s>' + total_src_list['valid2'][i]
 
     dataset_dict = {
         'train': CustomDataset(tokenizer=tokenizer,
@@ -87,7 +100,7 @@ def augmenter_training(args):
 
     # 1) Model initiating
     write_log(logger, 'Instantiating model...')
-    model = TransformerModel(encoder_model_type=args.encoder_model_type, decoder_model_type=args.decoder_model_type,
+    model = TransformerModel(encoder_model_type=args.aug_encoder_model_type, decoder_model_type=args.aug_decoder_model_type,
                              isPreTrain=args.isPreTrain, encoder_out_mix_ratio=args.encoder_out_mix_ratio,
                              encoder_out_cross_attention=args.encoder_out_cross_attention,
                              encoder_out_to_augmenter=args.encoder_out_to_augmenter, classify_method=args.classify_method,
@@ -95,14 +108,14 @@ def augmenter_training(args):
     model.to(device)
 
     # 2) Optimizer & Learning rate scheduler setting
-    cls_optimizer = optimizer_select(optimizer_model=args.cls_optimizer, model=model, lr=args.cls_lr, w_decay=args.w_decay)
-    aug_optimizer = optimizer_select(optimizer_model=args.aug_optimizer, model=model, lr=args.aug_lr, w_decay=args.w_decay)
-    cls_scheduler = shceduler_select(phase='cls', scheduler_model=args.cls_scheduler, optimizer=cls_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
-    aug_scheduler = shceduler_select(phase='aug', scheduler_model=args.aug_scheduler, optimizer=aug_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
+    aug_cls_optimizer = optimizer_select(optimizer_model=args.aug_cls_optimizer, model=model, lr=args.aug_cls_lr, w_decay=args.w_decay)
+    aug_recon_optimizer = optimizer_select(optimizer_model=args.aug_recon_optimizer, model=model, lr=args.aug_recon_lr, w_decay=args.w_decay)
+    aug_cls_scheduler = shceduler_select(phase='cls', scheduler_model=args.aug_cls_scheduler, optimizer=aug_cls_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
+    aug_recon_scheduler = shceduler_select(phase='aug', scheduler_model=args.aug_recon_scheduler, optimizer=aug_recon_optimizer, dataloader_len=len(dataloader_dict['train']), args=args)
 
     cudnn.benchmark = True
-    cls_criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps).to(device)
-    recon_criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing_eps, ignore_index=model.pad_idx).to(device)
+    cls_criterion = nn.CrossEntropyLoss(label_smoothing=args.cls_label_smoothing_eps).to(device)
+    recon_criterion = nn.CrossEntropyLoss(label_smoothing=args.recon_label_smoothing_eps, ignore_index=model.pad_idx).to(device)
 
     # 3) Model resume
     start_epoch = 0
@@ -114,10 +127,10 @@ def augmenter_training(args):
         cls_training_done = checkpoint['cls_training_done']
         start_epoch = checkpoint['epoch'] - 1
         model.load_state_dict(checkpoint['model'])
-        cls_optimizer.load_state_dict(checkpoint['cls_optimizer'])
-        aug_optimizer.load_state_dict(checkpoint['aug_optimizer'])
-        cls_scheduler.load_state_dict(checkpoint['cls_scheduler'])
-        aug_scheduler.load_state_dict(checkpoint['aug_scheduler'])
+        aug_cls_optimizer.load_state_dict(checkpoint['aug_cls_optimizer'])
+        aug_recon_optimizer.load_state_dict(checkpoint['aug_recon_optimizer'])
+        aug_cls_scheduler.load_state_dict(checkpoint['aug_cls_scheduler'])
+        aug_recon_scheduler.load_state_dict(checkpoint['aug_recon_scheduler'])
         del checkpoint
 
     #===================================#
@@ -128,7 +141,7 @@ def augmenter_training(args):
     best_aug_val_loss = 1e+4
     best_cls_val_loss = 1e+4
 
-    for epoch in range(start_epoch + 1, args.cls_num_epochs + 1):
+    for epoch in range(start_epoch + 1, args.aug_cls_num_epochs + 1):
         start_time_e = time()
         model = encoder_parameter_grad(model, on=True)
 
@@ -140,7 +153,7 @@ def augmenter_training(args):
 
         for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
-            cls_optimizer.zero_grad(set_to_none=True)
+            aug_cls_optimizer.zero_grad(set_to_none=True)
 
             # Input setting
             b_iter = input_to_device(batch_iter, device=device)
@@ -166,14 +179,14 @@ def augmenter_training(args):
             total_cls_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-            cls_optimizer.step()
-            cls_scheduler.step()
+            aug_cls_optimizer.step()
+            aug_cls_scheduler.step()
 
             # Print loss value only training
             if i == 0 or i % args.print_freq == 0 or i == len(dataloader_dict['train'])-1:
                 train_acc = (classifier_out.argmax(dim=1) == trg_label.argmax(dim=1)).sum() / len(trg_label)
                 iter_log = "[Epoch:%03d][%03d/%03d] train_cls_loss:%03.2f | train_accuracy:%03.2f | train_mmd_loss:%03.2f | learning_rate:%1.6f |spend_time:%02.2fmin" % \
-                    (epoch, i, len(dataloader_dict['train'])-1, cls_loss.item(), train_acc.item(), mmd_loss.item(), cls_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                    (epoch, i, len(dataloader_dict['train'])-1, cls_loss.item(), train_acc.item(), mmd_loss.item(), aug_cls_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                 write_log(logger, iter_log)
 
             if args.debuging_mode:
@@ -216,21 +229,21 @@ def augmenter_training(args):
         # val_mmd_loss /= len(dataloader_dict['valid'])
         val_cls_loss /= len(dataloader_dict['valid'])
         val_acc /= len(dataloader_dict['valid'])
-        write_log(logger, 'Classifier Validation MMD Loss: %3.3f' % val_mmd_loss)
-        write_log(logger, 'Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
-        write_log(logger, 'Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
+        write_log(logger, 'Augmenter Classifier Validation MMD Loss: %3.3f' % val_mmd_loss)
+        write_log(logger, 'Augmenter Classifier Validation CrossEntropy Loss: %3.3f' % val_cls_loss)
+        write_log(logger, 'Augmenter Classifier Validation Accuracy: %3.2f%%' % (val_acc * 100))
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.aug_encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
         if val_cls_loss < best_cls_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
                 'cls_training_done': False,
                 'epoch': epoch,
                 'model': model.state_dict(),
-                'cls_optimizer': cls_optimizer.state_dict(),
-                'aug_optimizer': aug_optimizer.state_dict(),
-                'cls_scheduler': cls_scheduler.state_dict(),
-                'aug_scheduler': aug_scheduler.state_dict(),
+                'aug_cls_optimizer': aug_cls_optimizer.state_dict(),
+                'aug_recon_optimizer': aug_recon_optimizer.state_dict(),
+                'aug_cls_scheduler': aug_cls_scheduler.state_dict(),
+                'aug_recon_scheduler': aug_recon_scheduler.state_dict(),
             }, save_file_name)
             best_cls_val_loss = val_cls_loss
             best_cls_epoch = epoch
@@ -238,7 +251,8 @@ def augmenter_training(args):
             else_log = f'Still {best_cls_epoch} epoch Loss({round(best_cls_val_loss.item(), 2)}) is better...'
             write_log(logger, else_log)
 
-    for epoch in range(start_epoch + 1, args.aug_num_epochs + 1):
+    for epoch in range(start_epoch + 1, args.aug_recon_num_epochs + 1):
+        print('sibal')
         start_time_e = time()
 
         write_log(logger, 'Augmenter training start...')
@@ -248,7 +262,7 @@ def augmenter_training(args):
 
         for i, batch_iter in enumerate(tqdm(dataloader_dict['train'], bar_format='{l_bar}{bar:30}{r_bar}{bar:-2b}')):
 
-            aug_optimizer.zero_grad(set_to_none=True)
+            aug_recon_optimizer.zero_grad(set_to_none=True)
 
             # Input setting
             b_iter = input_to_device(batch_iter, device=device)
@@ -268,7 +282,7 @@ def augmenter_training(args):
 
             # Reconstruction
             recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
-            recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
+            recon_loss = recon_criterion(recon_out.view(-1, model.vocab_num), src_sequence.contiguous().view(-1)) # T5 Vocab_size = 32000, T5 Model config Vocab_size = 32128 -> Need to fix
 
             # Additional Loss
             encoder_out = model.encode(input_ids=recon_out.argmax(dim=2))
@@ -286,14 +300,14 @@ def augmenter_training(args):
             total_loss.backward()
             if args.clip_grad_norm > 0:
                 clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-            aug_optimizer.step()
-            aug_scheduler.step()
+            aug_recon_optimizer.step()
+            aug_recon_scheduler.step()
 
             # Print loss value only training
             if i == 0 or i % args.print_freq == 0 or i == len(dataloader_dict['train'])-1:
                 # train_acc = (recon_out.view(-1, src_vocab_num).argmax(dim=1) == src_sequence.contiguous().view(-1)).sum() / len(src_sequence)
                 iter_log = "[Epoch:%03d][%03d/%03d] train_recon_loss:%03.2f | train_cls2_loss:%03.2f | learning_rate:%1.6f |spend_time:%02.2fmin" % \
-                    (epoch, i, len(dataloader_dict['train'])-1, recon_loss.item(), cls_loss2.item(), aug_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
+                    (epoch, i, len(dataloader_dict['train'])-1, recon_loss.item(), cls_loss2.item(), aug_recon_optimizer.param_groups[0]['lr'], (time() - start_time_e) / 60)
                 write_log(logger, iter_log)
 
             if args.debuging_mode:
@@ -323,7 +337,7 @@ def augmenter_training(args):
                 # Reconstruction
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
-                recon_loss = recon_criterion(recon_out.view(-1, src_vocab_num), src_sequence.contiguous().view(-1))
+                recon_loss = recon_criterion(recon_out.view(-1, model.vocab_num), src_sequence.contiguous().view(-1))
                 val_recon_loss += recon_loss
 
             if args.debuging_mode:
@@ -332,17 +346,17 @@ def augmenter_training(args):
         val_recon_loss /= len(dataloader_dict['valid'])
         write_log(logger, 'Augmenter Validation CrossEntropy Loss: %3.3f' % val_recon_loss)
 
-        save_file_name = os.path.join(args.model_save_path, args.data_name, args.encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
+        save_file_name = os.path.join(args.model_save_path, args.data_name, args.aug_encoder_model_type, f'checkpoint_seed_{args.random_seed}.pth.tar')
         if val_recon_loss < best_aug_val_loss:
             write_log(logger, 'Model checkpoint saving...')
             torch.save({
                 'cls_training_done': True,
                 'epoch': epoch,
                 'model': model.state_dict(),
-                'cls_optimizer': cls_optimizer.state_dict(),
-                'aug_optimizer': aug_optimizer.state_dict(),
-                'cls_scheduler': cls_scheduler.state_dict(),
-                'aug_scheduler': aug_scheduler.state_dict(),
+                'aug_cls_optimizer': aug_cls_optimizer.state_dict(),
+                'aug_recon_optimizer': aug_recon_optimizer.state_dict(),
+                'aug_cls_scheduler': aug_cls_scheduler.state_dict(),
+                'aug_recon_scheduler': aug_recon_scheduler.state_dict(),
             }, save_file_name)
             best_aug_val_loss = val_recon_loss
             best_aug_epoch = epoch
@@ -393,7 +407,8 @@ def augmenter_training(args):
                 recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out, latent_out=latent_out)
 
                 # Output Tokenizing & Pre-processing
-                detokenized = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
+                detokenized = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=False)
+                print('detokenized: ', detokenized)
                 eps_dict['eps_0'] = detokenized[0]
                 inp_dict = model.tokenizer(detokenized, max_length=args.src_max_len,
                                         padding='max_length', truncation=True, return_tensors='pt')
@@ -435,8 +450,8 @@ def augmenter_training(args):
 
                 with torch.no_grad():
                     recon_out = model(input_ids=src_sequence, attention_mask=src_att, encoder_out=encoder_out_copy, latent_out=latent_out_copy)
-                    recon_decoding = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=True)
-                    eps_dict['eps_1'] = recon_decoding[0]
+                    recon_decoding = model.tokenizer.batch_decode(recon_out.argmax(dim=2), skip_special_tokens=False)
+                    eps_dict['eps_1'] = recon_decoding[0]   
 
                 inp_dict = model.tokenizer(recon_decoding,
                                             max_length = args.src_max_len,
@@ -471,6 +486,7 @@ def augmenter_training(args):
                 write_log(logger, f'Revised Probability: {revised_prob}')
                 write_log(logger, f'Augmented: {eps_dict["eps_1"]}')
                 write_log(logger, f'Augmented Probability: {prob_dict["eps_1"]}')
+                print('sibal2')
 
     # 3) Results
     write_log(logger, f'Best AUG Epoch: {best_aug_epoch}')

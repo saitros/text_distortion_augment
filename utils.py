@@ -30,8 +30,8 @@ def path_check(args):
     if not os.path.exists(os.path.join(args.preprocess_path, args.data_name)):
         os.makedirs(os.path.join(args.preprocess_path, args.data_name))
 
-    if not os.path.exists(os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type)):
-        os.makedirs(os.path.join(args.preprocess_path, args.data_name, args.encoder_model_type))
+    if not os.path.exists(os.path.join(args.preprocess_path, args.data_name, args.aug_encoder_model_type)):
+        os.makedirs(os.path.join(args.preprocess_path, args.data_name, args.aug_encoder_model_type))
 
     # Model Checkpoint Path Checking
     if not os.path.exists(args.model_save_path):
@@ -40,12 +40,15 @@ def path_check(args):
     if not os.path.exists(os.path.join(args.model_save_path, args.data_name)):
         os.makedirs(os.path.join(args.model_save_path, args.data_name))
 
-    if not os.path.exists(os.path.join(args.model_save_path, args.data_name, args.encoder_model_type)):
-        os.makedirs(os.path.join(args.model_save_path, args.data_name, args.encoder_model_type))
+    if not os.path.exists(os.path.join(args.model_save_path, args.data_name, args.aug_encoder_model_type)):
+        os.makedirs(os.path.join(args.model_save_path, args.data_name, args.aug_encoder_model_type))
 
     # Testing Results Path Checking
     if not os.path.exists(args.result_path):
         os.makedirs(args.result_path)
+
+    if not os.path.exists(os.path.join(args.result_path, args.data_name)):
+        os.makedirs(os.path.join(args.result_path, args.data_name))
 
 class TqdmLoggingHandler(logging.Handler):
     def __init__(self, level=logging.DEBUG):
@@ -113,4 +116,6 @@ def return_model_name(model_type):
         out = 'facebook/bart-large'
     if model_type == 'kr_bart':
         out = 'cosmoquester/bart-ko-mini'
+    if model_type == 'T5':
+        out = 't5-base'
     return out

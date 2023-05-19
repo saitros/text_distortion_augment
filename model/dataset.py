@@ -54,7 +54,7 @@ class CustomDataset(Dataset):
                 if min_len <= len(src):
                     self.src_tensor_list2.append(src)
 
-        self.trg_tensor_list = F.one_hot(torch.tensor(trg_list, dtype=torch.long)).numpy()
+        self.trg_tensor_list = trg_list
 
         self.num_data = len(self.src_tensor_list)
 
