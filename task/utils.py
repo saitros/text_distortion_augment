@@ -165,17 +165,17 @@ def data_load(args):
     if args.data_name == 'GYAFC':
         args.data_path = os.path.join(args.data_path,'GYAFC(E&M)')
 
-        with open(os.path.join(args.data_path, 'train/formal'), 'r') as fp:
+        with open(os.path.join(args.data_path, 'train/formal'), 'r',  encoding="utf-8") as fp:
             src_list['train'] = fp.readlines()
             src_list['train'] = list(map(lambda s: s.strip(), src_list['train']))
-        with open(os.path.join(args.data_path, 'train/informal'), 'r') as fp:
+        with open(os.path.join(args.data_path, 'train/informal'), 'r',  encoding="utf-8") as fp:
             trg_list['train'] = fp.readlines()
             trg_list['train'] = list(map(lambda s: s.strip(), trg_list['train']))
 
-        with open(os.path.join(args.data_path, 'test/formal'), 'r') as fp:
+        with open(os.path.join(args.data_path, 'test/formal'), 'r',  encoding="utf-8") as fp:
             src_list['test'] = fp.readlines()
             src_list['test'] = list(map(lambda s: s.strip(), src_list['test']))
-        with open(os.path.join(args.data_path, 'test/informal.ref0'), 'r') as fp:
+        with open(os.path.join(args.data_path, 'test/informal.ref0'), 'r',  encoding="utf-8") as fp:
             trg_list['test'] = fp.readlines()
             trg_list['test'] = list(map(lambda s: s.strip(), trg_list['test']))
 
